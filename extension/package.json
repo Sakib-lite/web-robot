@@ -1,0 +1,28 @@
+{
+  "name": "@web-robot/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "build": "wxt build",
+    "zip": "wxt zip",
+    "compile": "tsc --noEmit",
+    "typecheck": "wxt prepare && tsc --noEmit",
+    "test": "vitest run",
+    "postinstall": "wxt prepare || true"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "happy-dom": "^21.0.0",
+    "typescript": "^5.8.0",
+    "vitest": "^5.1.0",
+    "wxt": "^0.21.5"
+  }
+}
