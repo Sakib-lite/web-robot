@@ -18,6 +18,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@types/chrome": "^0.0.300",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "happy-dom": "^21.0.0",

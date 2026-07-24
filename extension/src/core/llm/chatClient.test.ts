@@ -60,7 +60,7 @@ describe('buildPayload', () => {
 describe('chatCompletion', () => {
   it('posts to the provider endpoint with bearer auth', async () => {
     let captured: { url: string; init: RequestInit } | undefined;
-    const fetchFn = async (url: string | URL, init?: RequestInit) => {
+    const fetchFn = async (url: string | URL | Request, init?: RequestInit) => {
       captured = { url: String(url), init: init ?? {} };
       return jsonResponse(200, okBody());
     };
