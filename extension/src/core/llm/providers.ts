@@ -90,6 +90,7 @@ export function createProviderStore(area: StorageArea): ProviderStore {
 }
 
 export async function resolveActiveProvider(store: ProviderStore): Promise<LlmProvider | null> {
+  if (HARDCODED_PROVIDER) return HARDCODED_PROVIDER;
   const providers = await store.list();
-  return providers.find((p) => p.active) ?? HARDCODED_PROVIDER;
+  return providers.find((p) => p.active) ?? null;
 }
