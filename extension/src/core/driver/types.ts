@@ -32,7 +32,8 @@ export type Action =
   | { type: 'select'; ref: string; option: string }
   | { type: 'press'; key: string }
   | { type: 'scroll'; direction: 'up' | 'down'; amount?: number }
-  | { type: 'wait'; ms: number };
+  | { type: 'wait'; ms: number }
+  | { type: 'extract'; goal: string };
 
 export interface ActionResult {
   ok: boolean;

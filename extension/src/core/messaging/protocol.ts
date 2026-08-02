@@ -3,7 +3,7 @@ import type { Action, Snapshot, TabInfo } from '../driver/types';
 export type ContentRequest =
   | { type: 'PING' }
   | { type: 'SNAPSHOT' }
-  | { type: 'ACT'; action: Extract<Action, { type: 'click' | 'fill' | 'select' | 'press' | 'scroll' | 'wait' }> };
+  | { type: 'ACT'; action: Extract<Action, { type: 'click' | 'fill' | 'select' | 'press' | 'scroll' | 'wait' | 'extract' }> };
 
 export type ContentResponse =
   | { ok: true; url?: string; snapshot?: Snapshot; detail?: string }

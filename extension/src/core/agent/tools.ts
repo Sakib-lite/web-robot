@@ -24,7 +24,7 @@ export const toolSpecs = {
   select: { description: 'Choose an option of a select dropdown by ref.', schema: z.object({ ref: z.string(), option: z.string() }) },
   press: { description: 'Press a key on the focused element, e.g. Enter or Escape.', schema: z.object({ key: z.string() }) },
   scroll: { description: 'Scroll the page up or down.', schema: z.object({ direction: z.enum(['up', 'down']), amount: z.number().int().optional() }) },
-  extract: { description: 'Read targeted information from the page. Prefer this over dump-style reading.', schema: z.object({ goal: z.string() }) },
+  extract: { description: 'Read targeted information from the page. Returns the main content text; use it after each page of a listing task.', schema: z.object({ goal: z.string() }) },
   wait: { description: 'Wait before the next observation, at most 5000 ms.', schema: z.object({ ms: z.number().int().min(0).max(5000) }) },
   snapshot: { description: 'Re-read the current page observation (tabs + elements).', schema: z.object({}) },
   ask_user: { description: 'Ask the user a question when blocked, or to confirm an irreversible action.', schema: z.object({ question: z.string() }) },
@@ -81,6 +81,7 @@ export function parseCall(name: string, args: Record<string, unknown>): { ok: tr
     case 'wait':
       return { ok: true, call: { kind: 'action', action: { type: 'wait', ms: Number(a.ms) } } };
     case 'extract':
+      return { ok: true, call: { kind: 'action', action: { type: 'extract', goal: String(a.goal) } } };
     case 'snapshot':
       return { ok: true, call: { kind: 'observe' } };
     case 'ask_user':

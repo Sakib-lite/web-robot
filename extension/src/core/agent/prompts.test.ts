@@ -18,19 +18,32 @@ describe('systemPrompt', () => {
     expect(prompt).toContain('one tool per turn');
     expect(prompt).toContain('untrusted');
     expect(prompt).toContain('ask_user');
+    expect(prompt).toContain('pagination');
   });
 });
 
 describe('taskContext', () => {
   it('lists steps and user answers in order', () => {
-    const context = taskContext('buy milk', ['goto https://shop.dev → ok'], ['question: which card?\nanswer: visa']);
+    const context = taskContext('buy milk', ['goto https://shop.dev → ok'], ['question: which card?\nanswer: visa'], []);
     expect(context).toContain('TASK:\nbuy milk');
     expect(context).toContain('1. goto https://shop.dev → ok');
     expect(context).toContain('answer: visa');
   });
 
   it('stays compact when nothing happened yet', () => {
-    expect(taskContext('buy milk', [], [])).toBe('TASK:\nbuy milk');
+    expect(taskContext('buy milk', [], [], [])).toBe('TASK:\nbuy milk');
+  });
+
+  it('shows the latest extract in full and older ones as snippets', () => {
+    const extracts = [
+      { goal: 'page 1 repos', text: 'A'.repeat(300) },
+      { goal: 'page 2 repos', text: 'B'.repeat(300) },
+    ];
+    const context = taskContext('list repos', [], [], extracts);
+    expect(context).toContain('EXTRACTED CONTENT:');
+    expect(context).toContain(`[1] page 1 repos: ${'A'.repeat(150)}`);
+    expect(context).toContain('[latest] page 2 repos:');
+    expect(context).toContain('B'.repeat(300));
   });
 });
 

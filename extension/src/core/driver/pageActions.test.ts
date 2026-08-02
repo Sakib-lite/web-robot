@@ -90,4 +90,23 @@ describe('runPageAction', () => {
     await runPageAction({ type: 'scroll', direction: 'up', amount: 150 }, () => null, window);
     expect(window.scrollY).toBe(250);
   });
+
+  it('extracts the main content instead of the whole body', async () => {
+    document.body.innerHTML = `
+      <header>Global nav noise that should not appear in the extract result</header>
+      <main><h1>Repos</h1><p>web-robot</p><p>resume-server</p></main>
+    `;
+    const result = await runPageAction({ type: 'extract', goal: 'repo names' }, () => null, window);
+    expect(result.ok).toBe(true);
+    expect(result.detail).toContain('web-robot');
+    expect(result.detail).toContain('resume-server');
+    expect(result.detail).not.toContain('Global nav noise');
+  });
+
+  it('fails extraction on an empty page', async () => {
+    document.body.innerHTML = '';
+    const result = await runPageAction({ type: 'extract', goal: 'anything' }, () => null, window);
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain('no readable text');
+  });
 });

@@ -75,9 +75,9 @@ describe('buildSnapshot', () => {
   });
 
   it('truncates page text and collapses blank lines', () => {
-    withBody(`<p>${'x'.repeat(3000)}</p><p>tail</p>`);
+    withBody(`<p>${'x'.repeat(6000)}</p><p>tail</p>`);
     const snap = buildSnapshot(document);
-    expect(snap.text.length).toBeLessThanOrEqual(2500);
+    expect(snap.text.length).toBeLessThanOrEqual(4000);
   });
 
   it('carries the page url and title', () => {
@@ -86,5 +86,16 @@ describe('buildSnapshot', () => {
     const snap = buildSnapshot(document);
     expect(snap.title).toBe('Shop');
     expect(snap.url).toContain('http');
+  });
+
+  it('prefers main content over body noise in the page text', () => {
+    withBody(`
+      <header>Sign up Sign in Dashboard notifications</header>
+      <main><h1>Repositories</h1><p>web-robot</p><p>stopwatch</p></main>
+    `);
+    const snap = buildSnapshot(document);
+    expect(snap.text).toContain('web-robot');
+    expect(snap.text).toContain('Repositories');
+    expect(snap.text).not.toContain('notifications');
   });
 });
