@@ -1,3 +1,18 @@
 import type { LlmProvider } from './providers';
 
-export const HARDCODED_PROVIDER: LlmProvider | null = null;
+const env = import.meta.env as Record<string, string | undefined>;
+const apiKey = env.VITE_WEB_ROBOT_LLM_API_KEY?.trim();
+const baseUrl = env.VITE_WEB_ROBOT_LLM_BASE_URL?.trim().replace(/\/+$/, '');
+const model = env.VITE_WEB_ROBOT_LLM_MODEL?.trim();
+
+export const HARDCODED_PROVIDER: LlmProvider | null =
+  apiKey && baseUrl && model
+    ? {
+        id: 'hardcoded-glm-coding',
+        name: env.VITE_WEB_ROBOT_LLM_NAME?.trim() || 'LLM (env)',
+        baseUrl,
+        apiKey,
+        model,
+        active: true,
+      }
+    : null;
