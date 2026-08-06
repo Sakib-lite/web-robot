@@ -3,6 +3,7 @@ node_modules/
 .output/
 .wxt/
 dist/
+.idea/
 .env
 .env.*
 !.env.example
