@@ -1,3 +1,5 @@
+<img width="250" height="162" alt="Adobe Express - Screen Recording 2026-11-14 at 2 48 05 AM" src="https://github.com/user-attachments/assets/498c8d8b-4e3f-40c8-88da-439025533c5a" />
+
 # web-robot
 
 Autonomous browser agent for Chrome. Tell it a task in plain language — it opens pages, clicks, fills forms, extracts information, and reports back, deciding each next step on its own. Works in your real Chrome with your existing logins. Any OpenAI-compatible LLM can drive it.
