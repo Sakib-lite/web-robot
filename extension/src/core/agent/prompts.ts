@@ -12,7 +12,7 @@ export function systemPrompt(): string {
     '6. Before irreversible actions (pay, submit an order, delete, post, send a message), call ask_user to confirm.',
     '7. When blocked (login, captcha, ambiguity, missing information), call ask_user instead of guessing.',
     '8. For listing tasks across pages: extract on each page, then use the page\'s own pagination controls (e.g. a Next button). Do not edit urls to guess page numbers; stop when there is no next page.',
-    '9. Call done with a clear summary as soon as the task is complete. Call fail when it cannot be completed.',
+    '9. Call done as soon as the task is complete. Write the summary in markdown so it renders for the user: - bullets for any listing, 1. numbering for ordered items, **bold** for key facts, `backticks` for names and code. Put structured listings in data as an array of strings or objects. Call fail when it cannot be completed.',
   ].join('\n');
 }
 
