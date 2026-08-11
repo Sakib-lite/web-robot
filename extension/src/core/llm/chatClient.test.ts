@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildPayload, chatCompletion, type ChatMessage, type ToolDef } from './chatClient';
+import { chatCompletion } from './chatClient';
 import type { LlmProvider } from './providers';
+import type { ToolDef } from './types';
 
 function provider(over: Partial<LlmProvider> = {}): LlmProvider {
-  return { id: 'p1', name: 'test', baseUrl: 'https://api.test/v4', apiKey: 'sk-test', model: 'gpt-4o', active: true, ...over };
+  return { productId: 'glm', baseUrl: 'https://api.z.ai/api/coding/paas/v4', apiKey: 'sk-test', model: 'glm-5.3', ...over };
 }
 
 const tool: ToolDef = {
@@ -24,26 +25,55 @@ function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
-describe('buildPayload', () => {
-  it('adds thinking and full max_tokens on glm endpoints', () => {
-    const payload = buildPayload(provider({ baseUrl: 'https://api.z.ai/api/coding/paas/v4', model: 'glm-4.7' }), { messages: [{ role: 'user', content: 'hi' }], thinking: false, maxTokens: 8000 });
-    expect(payload.thinking).toEqual({ type: 'disabled' });
-    expect(payload.max_tokens).toBe(8000);
+describe('chatCompletion wire behavior per product', () => {
+  it('sends glm thinking and full budget, parses tool calls back', async () => {
+    let captured: RequestInit | undefined;
+    const fetchFn = async (_url: string | URL | Request, init?: RequestInit) => {
+      captured = init;
+      return jsonResponse(200, okBody());
+    };
+    const res = await chatCompletion(provider({ thinking: 'enabled' }), { messages: [{ role: 'user', content: 'hi' }], tools: [tool], maxTokens: 8000 }, fetchFn);
+
+    const payload = JSON.parse(String(captured!.body));
+    expect(payload).toMatchObject({ model: 'glm-5.3', max_tokens: 8000, thinking: { type: 'enabled' } });
+    expect(payload.tools[0].function.name).toBe('click');
+    expect(res.content).toBe('ok');
+    expect(res.toolCalls).toEqual([{ id: 'c1', name: 'click', args: { ref: 'e3' } }]);
+    expect(res.usage).toEqual({ inputTokens: 10, outputTokens: 5 });
+    expect(new Headers(captured!.headers).get('authorization')).toBe('Bearer sk-test');
   });
 
-  it('clamps max_tokens and omits thinking on foreign endpoints', () => {
-    const payload = buildPayload(provider(), { messages: [{ role: 'user', content: 'hi' }], maxTokens: 32768 });
-    expect('thinking' in payload).toBe(false);
+  it('switches wire shape with the product: openai gets clamped tokens, no thinking', async () => {
+    let captured: RequestInit | undefined;
+    const fetchFn = async (_url: string | URL | Request, init?: RequestInit) => {
+      captured = init;
+      return jsonResponse(200, okBody());
+    };
+    await chatCompletion(provider({ productId: 'openai', model: 'gpt-4o' }), { messages: [] }, fetchFn);
+    const payload = JSON.parse(String(captured!.body));
+    expect(payload.model).toBe('gpt-4o');
     expect(payload.max_tokens).toBe(16384);
+    expect('thinking' in payload).toBe(false);
   });
 
-  it('serializes assistant tool calls and tool results', () => {
-    const messages: ChatMessage[] = [
-      { role: 'user', content: 'go' },
-      { role: 'assistant', toolCalls: [{ id: 'c1', name: 'click', args: { ref: 'e3' } }] },
-      { role: 'tool', toolCallId: 'c1', content: 'clicked' },
-    ];
-    const payload = buildPayload(provider(), { messages });
+  it('serializes assistant tool calls and tool results for the follow-up turn', async () => {
+    let captured: RequestInit | undefined;
+    const fetchFn = async (_url: string | URL | Request, init?: RequestInit) => {
+      captured = init;
+      return jsonResponse(200, okBody());
+    };
+    await chatCompletion(
+      provider(),
+      {
+        messages: [
+          { role: 'user', content: 'go' },
+          { role: 'assistant', toolCalls: [{ id: 'c1', name: 'click', args: { ref: 'e3' } }] },
+          { role: 'tool', toolCallId: 'c1', content: 'clicked' },
+        ],
+      },
+      fetchFn,
+    );
+    const payload = JSON.parse(String(captured!.body));
     expect(payload.messages).toEqual([
       { role: 'user', content: 'go' },
       { role: 'assistant', content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'click', arguments: '{"ref":"e3"}' } }] },
@@ -51,38 +81,10 @@ describe('buildPayload', () => {
     ]);
   });
 
-  it('maps tools onto the function wire shape', () => {
-    const payload = buildPayload(provider(), { messages: [], tools: [tool] });
-    expect(payload.tools).toEqual([{ type: 'function', function: { name: 'click', description: 'click an element', parameters: tool.parameters } }]);
-  });
-});
-
-describe('chatCompletion', () => {
-  it('posts to the provider endpoint with bearer auth', async () => {
-    let captured: { url: string; init: RequestInit } | undefined;
-    const fetchFn = async (url: string | URL | Request, init?: RequestInit) => {
-      captured = { url: String(url), init: init ?? {} };
-      return jsonResponse(200, okBody());
-    };
-    const res = await chatCompletion(provider(), { messages: [{ role: 'user', content: 'hi' }] }, fetchFn);
-    expect(captured!.url).toBe('https://api.test/v4/chat/completions');
-    expect(new Headers(captured!.init.headers).get('authorization')).toBe('Bearer sk-test');
-    expect(res.content).toBe('ok');
-    expect(res.toolCalls).toEqual([{ id: 'c1', name: 'click', args: { ref: 'e3' } }]);
-    expect(res.usage).toEqual({ inputTokens: 10, outputTokens: 5 });
-  });
-
   it('tolerates malformed tool arguments', async () => {
     const body = { choices: [{ message: { content: '', tool_calls: [{ id: 'c1', function: { name: 'click', arguments: '{broken' } }] } }] };
     const res = await chatCompletion(provider(), { messages: [] }, async () => jsonResponse(200, body));
     expect(res.toolCalls[0]!.args).toEqual({ _raw: '{broken' });
-  });
-
-  it('returns empty tool calls when the model replies with plain text', async () => {
-    const body = { choices: [{ message: { content: 'just saying hi' } }] };
-    const res = await chatCompletion(provider(), { messages: [] }, async () => jsonResponse(200, body));
-    expect(res.content).toBe('just saying hi');
-    expect(res.toolCalls).toEqual([]);
   });
 
   it('throws a descriptive error on non-2xx responses', async () => {

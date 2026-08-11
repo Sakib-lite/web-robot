@@ -1,96 +1,115 @@
 import type { StorageArea } from '../storage/area';
-import { HARDCODED_PROVIDER } from './seed';
+import { ENV_SEED } from './seed';
+import type { ProductId } from './products';
 
 export interface LlmProvider {
-  id: string;
-  name: string;
+  productId: ProductId;
   baseUrl: string;
   apiKey: string;
   model: string;
-  visionModel?: string;
+  thinking?: 'enabled' | 'disabled';
+  reasoningEffort?: 'low' | 'medium' | 'high';
+}
+
+export interface StoredProductConfig extends LlmProvider {
   active: boolean;
 }
 
-export type LlmProviderInput = Omit<LlmProvider, 'id' | 'active'> & { id?: string };
+export type ProductConfigInput = LlmProvider;
 
-export interface ProviderStore {
-  list(): Promise<LlmProvider[]>;
-  save(input: LlmProviderInput): Promise<LlmProvider>;
-  activate(id: string): Promise<void>;
-  remove(id: string): Promise<void>;
+export interface ProductStore {
+  area: StorageArea;
+  list(): Promise<StoredProductConfig[]>;
+  get(productId: ProductId): Promise<StoredProductConfig | null>;
+  save(input: ProductConfigInput): Promise<StoredProductConfig>;
+  activate(productId: ProductId): Promise<void>;
+  clear(productId: ProductId): Promise<void>;
 }
 
-const KEY = 'llmProviders';
-
-function newId() {
-  return `llm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+interface StoredShape {
+  configs?: Partial<Record<ProductId, LlmProvider>>;
+  active?: ProductId;
 }
 
-function normalize(input: LlmProviderInput): LlmProvider {
-  if (!input.name?.trim()) throw new Error('provider name is required');
-  if (!input.baseUrl?.trim()) throw new Error('provider base url is required');
-  if (!input.model?.trim()) throw new Error('provider model is required');
+const KEY = 'llmProductConfigs';
+const LEGACY_KEY = 'llmProviders';
+
+function validate(input: ProductConfigInput): LlmProvider {
+  if (!input.baseUrl?.trim()) throw new Error('base url is required');
+  if (!input.model?.trim()) throw new Error('model is required');
   return {
-    id: input.id ?? newId(),
-    name: input.name.trim(),
+    productId: input.productId,
     baseUrl: input.baseUrl.trim().replace(/\/+$/, ''),
     apiKey: input.apiKey?.trim() ?? '',
     model: input.model.trim(),
-    ...(input.visionModel?.trim() ? { visionModel: input.visionModel.trim() } : {}),
-    active: false,
+    ...(input.thinking ? { thinking: input.thinking } : {}),
+    ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
   };
 }
 
-export function createProviderStore(area: StorageArea): ProviderStore {
-  async function read(): Promise<LlmProvider[]> {
-    const rows = (await area.get<LlmProvider[]>(KEY))[KEY];
-    return Array.isArray(rows) ? rows : [];
+async function readShape(area: StorageArea): Promise<StoredShape> {
+  const all = await area.get<StoredShape>(KEY);
+  return (all[KEY] as StoredShape | undefined) ?? {};
+}
+
+export function createProductStore(area: StorageArea): ProductStore {
+  async function write(shape: StoredShape) {
+    await area.set({ [KEY]: shape });
   }
 
-  async function write(providers: LlmProvider[]) {
-    await area.set({ [KEY]: providers });
-  }
+  const store: ProductStore = {
+    area,
 
-  return {
     async list() {
-      return read();
+      const { configs, active } = await readShape(area);
+      return Object.entries(configs ?? {}).map(([productId, config]) => ({
+        ...config!,
+        productId: productId as ProductId,
+        active: productId === active,
+      }));
+    },
+
+    async get(productId) {
+      const { configs, active } = await readShape(area);
+      const config = configs?.[productId];
+      return config ? { ...config, productId, active: productId === active } : null;
     },
 
     async save(input) {
-      const provider = normalize(input);
-      const providers = await read();
-      const existingIndex = input.id ? providers.findIndex((p) => p.id === input.id) : -1;
-      if (existingIndex >= 0) {
-        provider.active = providers[existingIndex]!.active;
-        providers[existingIndex] = provider;
-      } else {
-        provider.active = providers.length === 0;
-        providers.push(provider);
-      }
-      await write(providers);
-      return provider;
+      const config = validate(input);
+      const shape = await readShape(area);
+      const active = shape.active ?? config.productId;
+      await write({ ...shape, configs: { ...shape.configs, [config.productId]: config }, active });
+      return { ...config, active: config.productId === active };
     },
 
-    async activate(id) {
-      const providers = await read();
-      if (!providers.some((p) => p.id === id)) throw new Error(`unknown provider: ${id}`);
-      await write(providers.map((p) => ({ ...p, active: p.id === id })));
+    async activate(productId) {
+      const shape = await readShape(area);
+      if (!shape.configs?.[productId]) throw new Error(`product ${productId} is not configured`);
+      await write({ ...shape, active: productId });
     },
 
-    async remove(id) {
-      const providers = await read();
-      const remaining = providers.filter((p) => p.id !== id);
-      if (remaining.length === providers.length) throw new Error(`unknown provider: ${id}`);
-      if (providers.find((p) => p.id === id)?.active && remaining.length > 0 && !remaining.some((p) => p.active)) {
-        remaining[0] = { ...remaining[0]!, active: true };
-      }
-      await write(remaining);
+    async clear(productId) {
+      const shape = await readShape(area);
+      if (!shape.configs?.[productId]) return;
+      const configs = { ...shape.configs };
+      delete configs[productId];
+      await write({ configs, active: shape.active === productId ? undefined : shape.active });
     },
   };
+  return store;
 }
 
-export async function resolveActiveProvider(store: ProviderStore): Promise<LlmProvider | null> {
-  if (HARDCODED_PROVIDER) return HARDCODED_PROVIDER;
-  const providers = await store.list();
-  return providers.find((p) => p.active) ?? null;
+export async function seedFromEnv(store: ProductStore, envSeed: LlmProvider | null = ENV_SEED) {
+  await store.area.set({ [LEGACY_KEY]: undefined });
+  if (!envSeed) return;
+  const existing = await store.get('glm');
+  if (existing) return;
+  await store.save(envSeed);
+}
+
+export async function resolveActiveProvider(store: ProductStore, envSeed: LlmProvider | null = ENV_SEED): Promise<LlmProvider | null> {
+  await seedFromEnv(store, envSeed);
+  const configs = await store.list();
+  return configs.find((c) => c.active) ?? null;
 }

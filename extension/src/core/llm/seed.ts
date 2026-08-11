@@ -5,14 +5,15 @@ const apiKey = env.VITE_WEB_ROBOT_LLM_API_KEY?.trim();
 const baseUrl = env.VITE_WEB_ROBOT_LLM_BASE_URL?.trim().replace(/\/+$/, '');
 const model = env.VITE_WEB_ROBOT_LLM_MODEL?.trim();
 
-export const HARDCODED_PROVIDER: LlmProvider | null =
+// one-time seed for the glm product config; stored in chrome.storage on first
+// resolve and editable from settings afterwards
+export const ENV_SEED: LlmProvider | null =
   apiKey && baseUrl && model
     ? {
-        id: 'hardcoded-glm-coding',
-        name: env.VITE_WEB_ROBOT_LLM_NAME?.trim() || 'LLM (env)',
+        productId: 'glm',
         baseUrl,
         apiKey,
         model,
-        active: true,
+        thinking: 'disabled',
       }
     : null;

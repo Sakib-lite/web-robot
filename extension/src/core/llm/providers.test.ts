@@ -1,93 +1,91 @@
 import { describe, expect, it } from 'vitest';
 import { memoryArea } from '../storage/area';
-import { createProviderStore, resolveActiveProvider, type LlmProviderInput } from './providers';
-import { HARDCODED_PROVIDER } from './seed';
+import {
+  createProductStore,
+  resolveActiveProvider,
+  seedFromEnv,
+  type LlmProvider,
+  type ProductConfigInput,
+} from './providers';
 
-function zaiProvider(over: Partial<LlmProviderInput> = {}): LlmProviderInput {
-  return { name: 'Z.ai', baseUrl: 'https://api.z.ai/api/coding/paas/v4', apiKey: 'sk-1', model: 'glm-4.7', ...over };
+function glmConfig(over: Partial<ProductConfigInput> = {}): ProductConfigInput {
+  return { productId: 'glm', baseUrl: 'https://api.z.ai/api/coding/paas/v4', apiKey: 'sk-1', model: 'glm-5.3', thinking: 'disabled', ...over };
 }
 
-describe('provider store', () => {
-  it('starts empty', async () => {
-    const store = createProviderStore(memoryArea());
+function openaiConfig(over: Partial<ProductConfigInput> = {}): ProductConfigInput {
+  return { productId: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: 'sk-oai', model: 'gpt-4o-mini', ...over };
+}
+
+describe('product store', () => {
+  it('starts with no configured products', async () => {
+    const store = createProductStore(memoryArea());
     expect(await store.list()).toEqual([]);
+    expect(await store.get('glm')).toBeNull();
   });
 
-  it('prefers the hardcoded provider over stored ones while hardcoded is set', async () => {
-    const store = createProviderStore(memoryArea());
-    await store.save(zaiProvider());
-    if (HARDCODED_PROVIDER === null) {
-      expect((await resolveActiveProvider(store))?.baseUrl).toBe('https://api.z.ai/api/coding/paas/v4');
-    } else {
-      expect(await resolveActiveProvider(store)).toBe(HARDCODED_PROVIDER);
-    }
+  it('saves per-product configs and auto-activates the first', async () => {
+    const store = createProductStore(memoryArea());
+    const saved = await store.save(glmConfig());
+    expect(saved.active).toBe(true);
+    expect((await store.get('openai'))).toBeNull();
+    expect((await resolveActiveProvider(store))?.productId).toBe('glm');
   });
 
-  it('falls back to the active stored provider when nothing is hardcoded', async () => {
-    const store = createProviderStore(memoryArea());
-    const first = await store.save(zaiProvider());
-    if (HARDCODED_PROVIDER === null) {
-      expect((await resolveActiveProvider(store))?.id).toBe(first.id);
-    }
+  it('keeps one active product across saves and activations', async () => {
+    const area = memoryArea();
+    const store = createProductStore(area);
+    await store.save(glmConfig());
+    await store.save(openaiConfig());
+    await store.activate('openai');
+    const configs = await store.list();
+    expect(configs.find((c) => c.productId === 'glm')?.active).toBe(false);
+    expect(configs.find((c) => c.productId === 'openai')?.active).toBe(true);
+    const resolved = await resolveActiveProvider(store);
+    expect(resolved?.productId).toBe('openai');
+    expect(resolved?.model).toBe('gpt-4o-mini');
   });
 
-  it('auto-activates the first saved provider', async () => {
-    const store = createProviderStore(memoryArea());
-    const first = await store.save(zaiProvider());
-    const providers = await store.list();
-    expect(providers).toHaveLength(1);
-    expect(providers[0]!.active).toBe(true);
-    expect(providers[0]!.id).toBe(first.id);
+  it('carries the product knobs (thinking, reasoning effort) through save', async () => {
+    const store = createProductStore(memoryArea());
+    await store.save(glmConfig({ thinking: 'enabled' }));
+    await store.save(openaiConfig({ reasoningEffort: 'medium' }));
+    expect((await store.get('glm'))?.thinking).toBe('enabled');
+    expect((await store.get('openai'))?.reasoningEffort).toBe('medium');
   });
 
-  it('keeps exactly one active provider on activate', async () => {
-    const store = createProviderStore(memoryArea());
-    const a = await store.save(zaiProvider());
-    const b = await store.save(zaiProvider({ name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1/', model: 'gpt-4o' }));
-    await store.activate(b.id);
-    const providers = await store.list();
-    expect(providers.find((p) => p.id === a.id)?.active).toBe(false);
-    expect(providers.find((p) => p.id === b.id)?.active).toBe(true);
+  it('normalizes base urls and rejects empty models', async () => {
+    const store = createProductStore(memoryArea());
+    const saved = await store.save(glmConfig({ baseUrl: 'https://api.z.ai/api/coding/paas/v4///' }));
+    expect(saved.baseUrl).toBe('https://api.z.ai/api/coding/paas/v4');
+    await expect(store.save(glmConfig({ model: '' }))).rejects.toThrow('model is required');
   });
 
-  it('normalizes trailing slashes and whitespace on save', async () => {
-    const store = createProviderStore(memoryArea());
-    const saved = await store.save(zaiProvider({ baseUrl: '  https://openrouter.ai/api/v1/  ', name: ' x ' }));
-    expect(saved.baseUrl).toBe('https://openrouter.ai/api/v1');
-    expect(saved.name).toBe('x');
+  it('refuses activation of unconfigured products and clears cleanly', async () => {
+    const store = createProductStore(memoryArea());
+    await expect(store.activate('generic')).rejects.toThrow('not configured');
+    await store.save(glmConfig());
+    await store.clear('glm');
+    expect(await store.get('glm')).toBeNull();
+    expect(await resolveActiveProvider(store, null)).toBeNull();
   });
 
-  it('rejects saves missing required fields', async () => {
-    const store = createProviderStore(memoryArea());
-    await expect(store.save(zaiProvider({ baseUrl: '' }))).rejects.toThrow('base url');
-    await expect(store.save(zaiProvider({ model: '' }))).rejects.toThrow('model');
+  it('seeds the glm config from env once and keeps user edits afterwards', async () => {
+    const store = createProductStore(memoryArea());
+    const envSeed: LlmProvider = { productId: 'glm', baseUrl: 'https://api.z.ai/api/coding/paas/v4', apiKey: 'sk-env', model: 'glm-5.3', thinking: 'disabled' };
+
+    await seedFromEnv(store, envSeed);
+    expect((await store.get('glm'))?.apiKey).toBe('sk-env');
+
+    await store.save(glmConfig({ apiKey: 'sk-user' }));
+    await seedFromEnv(store, envSeed);
+    expect((await store.get('glm'))?.apiKey).toBe('sk-user');
   });
 
-  it('updates an existing provider in place and keeps its active flag', async () => {
-    const store = createProviderStore(memoryArea());
-    const a = await store.save(zaiProvider());
-    await store.save(zaiProvider({ id: a.id, name: 'Z.ai v2', baseUrl: 'https://api.z.ai/api/coding/paas/v4', model: 'glm-4.7', apiKey: 'sk-1' }));
-    const providers = await store.list();
-    expect(providers).toHaveLength(1);
-    expect(providers[0]!.name).toBe('Z.ai v2');
-    expect(providers[0]!.active).toBe(true);
-  });
-
-  it('hands activation to the first remaining provider after removing the active one', async () => {
-    const store = createProviderStore(memoryArea());
-    const a = await store.save(zaiProvider());
-    const b = await store.save(zaiProvider({ name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'gpt-4o' }));
-    await store.activate(b.id);
-    await store.remove(b.id);
-    const providers = await store.list();
-    expect(providers).toHaveLength(1);
-    expect(providers.find((p) => p.id === a.id)?.active).toBe(true);
-  });
-
-  it('throws when activating or removing an unknown id', async () => {
-    const store = createProviderStore(memoryArea());
-    await store.save(zaiProvider());
-    await expect(store.activate('nope')).rejects.toThrow('unknown provider');
-    await expect(store.remove('nope')).rejects.toThrow('unknown provider');
+  it('wipes the legacy provider table during seeding', async () => {
+    const area = memoryArea();
+    await area.set({ llmProviders: [{ id: 'old', name: 'BigModel' }] });
+    const store = createProductStore(area);
+    await seedFromEnv(store, null);
+    expect((await area.get('llmProviders'))['llmProviders']).toBeUndefined();
   });
 });

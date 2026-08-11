@@ -2,11 +2,10 @@ import { useRef, useState } from 'react';
 import { runTask, type StepRecord, type TaskResult } from '@/core/agent/loop';
 import { createExtensionDriver } from '@/core/driver/extensionDriver';
 import { chatCompletion, type ChatMessage, type ChatResponse, type ToolDef } from '@/core/llm/chatClient';
-import { resolveActiveProvider, type ProviderStore } from '@/core/llm/providers';
-import { DEFAULT_SLOT_MODELS } from '@/core/llm/modelSlots';
+import { resolveActiveProvider, type ProductStore } from '@/core/llm/providers';
 import ResultView from './ResultView';
 
-export default function TaskRunner({ store }: { store: ProviderStore }) {
+export default function TaskRunner({ store }: { store: ProductStore }) {
   const [task, setTask] = useState('');
   const [running, setRunning] = useState(false);
   const [steps, setSteps] = useState<StepRecord[]>([]);
@@ -25,14 +24,14 @@ export default function TaskRunner({ store }: { store: ProviderStore }) {
       setError('no active llm provider - add one in settings first');
       return;
     }
-    setUsingProvider(`${provider.name} · ${provider.model}`);
+    setUsingProvider(`${provider.productId} · ${provider.model}`);
 
     setRunning(true);
     const controller = new AbortController();
     abortRef.current = controller;
 
     const chat = (messages: ChatMessage[], tools: ToolDef[]): Promise<ChatResponse> =>
-      chatCompletion(provider, { messages, tools, model: DEFAULT_SLOT_MODELS.main, maxTokens: 4096, signal: controller.signal });
+      chatCompletion(provider, { messages, tools, maxTokens: 4096, signal: controller.signal });
 
     const askUser = async (question: string) => window.prompt(`web-robot asks:\n${question}`);
 

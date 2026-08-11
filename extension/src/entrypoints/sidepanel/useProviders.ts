@@ -1,14 +1,15 @@
 import { useMemo, useState } from 'react';
 import { chromeArea } from '@/core/storage/area';
-import { createProviderStore, type LlmProvider } from '@/core/llm/providers';
+import { createProductStore, type StoredProductConfig } from '@/core/llm/providers';
+import type { ProductId } from '@/core/llm/products';
 
 export function useProviders() {
-  const store = useMemo(() => createProviderStore(chromeArea()), []);
-  const [providers, setProviders] = useState<LlmProvider[] | null>(null);
+  const store = useMemo(() => createProductStore(chromeArea()), []);
+  const [configs, setConfigs] = useState<StoredProductConfig[] | null>(null);
 
   async function refresh() {
-    setProviders(await store.list());
+    setConfigs(await store.list());
   }
 
-  return { store, providers, refresh };
+  return { store, configs, refresh };
 }
