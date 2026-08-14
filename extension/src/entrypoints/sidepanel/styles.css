@@ -304,6 +304,13 @@ button.danger {
   letter-spacing: normal;
 }
 
+.key-input {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
 .presets {
   display: flex;
   gap: 6px;

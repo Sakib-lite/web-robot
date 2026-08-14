@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { chatCompletion } from '@/core/llm/chatClient';
 import { allProducts, type Effort, type ProductId } from '@/core/llm/products';
 import type { LlmProvider, ProductStore, StoredProductConfig } from '@/core/llm/providers';
@@ -48,6 +48,7 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
   const [cards, setCards] = useState<Record<ProductId, CardState>>(EMPTY);
   const [testState, setTestState] = useState<TestState>(null);
   const [testing, setTesting] = useState(false);
+  const dirty = useRef(new Set<ProductId>());
 
   useEffect(() => {
     void refresh();
@@ -58,11 +59,31 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
     setCards((prev) => {
       const next = { ...prev };
       for (const product of allProducts()) {
+        if (dirty.current.has(product.id)) continue;
         next[product.id] = cardFor(product.id, configs.find((c) => c.productId === product.id));
       }
       return next;
     });
   }, [configs]);
+
+  function edit(productId: ProductId, patch: Partial<CardState>) {
+    dirty.current.add(productId);
+    setCards((prev) => ({ ...prev, [productId]: { ...prev[productId]!, ...patch } }));
+  }
+
+  async function pasteKey(productId: ProductId) {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text.trim()) {
+        setTestState({ productId, ok: false, message: 'clipboard is empty' });
+        return;
+      }
+      edit(productId, { apiKey: text.trim() });
+      setTestState({ productId, ok: true, message: 'pasted from clipboard' });
+    } catch (error) {
+      setTestState({ productId, ok: false, message: `clipboard read failed: ${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
 
   async function save(productId: ProductId) {
     const product = allProducts().find((p) => p.id === productId)!;
@@ -78,6 +99,7 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
         ...(productId === 'openai' && card.reasoningEffort ? { reasoningEffort: card.reasoningEffort } : {}),
       });
       setTestState({ productId, ok: true, message: 'saved' });
+      dirty.current.delete(productId);
       await refresh();
     } catch (error) {
       setTestState({ productId, ok: false, message: error instanceof Error ? error.message : String(error) });
@@ -126,14 +148,25 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
             </label>
             <label>
               api key
-              <input type="password" value={card.apiKey} onChange={(e) => setCards({ ...cards, [product.id]: { ...card, apiKey: e.target.value } })} placeholder={config?.apiKey ? 'saved' : 'paste key'} />
+              <div className="row">
+                <input
+                  type="text"
+                  className="key-input"
+                  value={card.apiKey}
+                  onChange={(e) => edit(product.id, { apiKey: e.target.value })}
+                  placeholder={config?.apiKey ? 'saved' : 'paste or click ⌘v'}
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+                <button onClick={() => pasteKey(product.id)}>paste</button>
+              </div>
             </label>
             <label>
               model
               <input
                 list={`${product.id}-models`}
                 value={card.model}
-                onChange={(e) => setCards({ ...cards, [product.id]: { ...card, model: e.target.value } })}
+                onChange={(e) => edit(product.id, { model: e.target.value })}
                 placeholder={product.defaults.model}
               />
               <datalist id={`${product.id}-models`}>
@@ -145,7 +178,7 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
             {product.id === 'glm' && (
               <label>
                 effort
-                <select value={card.thinking} onChange={(e) => setCards({ ...cards, [product.id]: { ...card, thinking: e.target.value as Effort } })}>
+                <select value={card.thinking} onChange={(e) => edit(product.id, { thinking: e.target.value as Effort })}>
                   <option value="off">off (fastest, no reasoning)</option>
                   <option value="low">low</option>
                   <option value="high">high</option>
@@ -156,7 +189,7 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
             {product.id === 'openai' && (
               <label>
                 reasoning effort
-                <select value={card.reasoningEffort} onChange={(e) => setCards({ ...cards, [product.id]: { ...card, reasoningEffort: e.target.value as CardState['reasoningEffort'] } })}>
+                <select value={card.reasoningEffort} onChange={(e) => edit(product.id, { reasoningEffort: e.target.value as CardState['reasoningEffort'] })}>
                   <option value="">default</option>
                   <option value="low">low</option>
                   <option value="medium">medium</option>
