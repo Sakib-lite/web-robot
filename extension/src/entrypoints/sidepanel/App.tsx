@@ -18,6 +18,13 @@ export default function App() {
           <button className={view === 'settings' ? 'tab on' : 'tab'} onClick={() => setView('settings')}>
             settings
           </button>
+          <button
+            className="tab"
+            title="restart the extension after a rebuild"
+            onClick={() => chrome.runtime.reload()}
+          >
+            ⟳
+          </button>
         </nav>
       </header>
       {view === 'task' ? <TaskRunner store={store} /> : <SettingsView store={store} configs={configs} refresh={refresh} />}

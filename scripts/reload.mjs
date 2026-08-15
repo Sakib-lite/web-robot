@@ -60,9 +60,9 @@ async function reloadViaDebugger(targets) {
 // path; reach it via the remote-debugging pipe only when the user started
 // chrome with a debug port. otherwise print the two-click instruction.
 function manualHint() {
-  log('could not reach Chrome on :9222 — do the 2-click reload:');
-  log('  chrome://extensions → web-robot → ↻');
-  log('(one-time fix: run Chrome once with  --remote-debugging-port=9222 --user-data-dir=$HOME/.web-robot-chrome)');
+  log('now reload the extension — one click, no chrome://extensions trip:');
+  log('  open the web-robot side panel → press the ⟳ button in the top bar');
+  log('(the ⟳ button calls chrome.runtime.reload(); the panel closes and reopens fresh)');
 }
 
 const targets = chromeDebugTargets();
