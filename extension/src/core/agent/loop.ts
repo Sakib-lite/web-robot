@@ -18,6 +18,13 @@ export interface TaskResult {
   steps: StepRecord[];
 }
 
+export interface LoopTelemetry {
+  observe(step: number, data: Record<string, unknown>): Promise<void>;
+  llm(step: number, data: Record<string, unknown>): Promise<void>;
+  action(step: number, data: Record<string, unknown>): Promise<void>;
+  answer(step: number, data: Record<string, unknown>): Promise<void>;
+}
+
 export interface LoopDeps {
   driver: Driver;
   chat: (messages: ChatMessage[], tools: ToolDef[]) => Promise<ChatResponse>;
@@ -25,6 +32,7 @@ export interface LoopDeps {
   maxSteps?: number;
   signal?: AbortSignal;
   onStep?: (step: StepRecord) => void;
+  telemetry?: LoopTelemetry;
 }
 
 const DEFAULT_MAX_STEPS = 40;
@@ -115,6 +123,13 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     } catch {
       // no accessible page yet; the observation block reports that
     }
+    await deps.telemetry?.observe(index + 1, {
+      tabs,
+      url: snapshot?.url ?? null,
+      title: snapshot?.title ?? null,
+      pageText: snapshot?.text ?? null,
+      elements: snapshot?.elements ?? null,
+    });
 
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt() },
@@ -125,11 +140,21 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     notes = [];
 
     let res: ChatResponse;
+    const chatStarted = Date.now();
     try {
       res = await deps.chat(messages, toolDefs());
     } catch (error) {
-      return { status: 'failed', reason: `llm error: ${error instanceof Error ? error.message : String(error)}`, steps };
+      const reason = error instanceof Error ? error.message : String(error);
+      await deps.telemetry?.llm(index + 1, { messages, error: reason, durationMs: Date.now() - chatStarted });
+      return { status: 'failed', reason: `llm error: ${reason}`, steps };
     }
+    await deps.telemetry?.llm(index + 1, {
+      messages,
+      responseContent: res.content,
+      toolCalls: res.toolCalls,
+      usage: res.usage ?? null,
+      durationMs: Date.now() - chatStarted,
+    });
 
     if (res.toolCalls.length === 0) {
       noToolStrikes++;
@@ -160,6 +185,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       const answer = await deps.askUser(agentCall.question);
       if (answer === null) return { status: 'stopped', reason: 'user dismissed the question', steps };
       userAnswers.push(`question: ${agentCall.question}\nanswer: ${answer}`);
+      await deps.telemetry?.answer(index + 1, { question: agentCall.question, answer });
       record(true, 'ask_user', `"${agentCall.question}" → "${answer}"`);
       index++;
       continue;
@@ -192,7 +218,15 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       return { status: 'failed', reason: `loop detected: ${describeAction(action)} repeated ${seen} times without page change`, steps };
     }
 
+    const actionStarted = Date.now();
     const result = await deps.driver.act(action);
+    await deps.telemetry?.action(index + 1, {
+      tool: action.type,
+      args: action,
+      ok: result.ok,
+      detail: result.detail,
+      durationMs: Date.now() - actionStarted,
+    });
     if (result.ok && action.type === 'extract') {
       const text = result.detail;
       extracts.push({ goal: action.goal, text });

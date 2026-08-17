@@ -218,6 +218,37 @@ describe('runTask', () => {
     expect(result.status).toBe('stopped');
     expect(chat).not.toHaveBeenCalled();
   });
+
+  it('streams observation, llm, action and answer events to telemetry', async () => {
+    const observe = vi.fn(async (_step: number, _data: Record<string, unknown>) => {});
+    const llm = vi.fn(async (_step: number, _data: Record<string, unknown>) => {});
+    const action = vi.fn(async (_step: number, _data: Record<string, unknown>) => {});
+    const answer = vi.fn(async (_step: number, _data: Record<string, unknown>) => {});
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('ask_user', { question: 'which site?' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('goto', { url: 'https://chosen.dev' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'ok' })]));
+    const result = await runTask('go somewhere', deps({ chat, telemetry: { observe, llm, action, answer } }));
+
+    expect(result.status).toBe('done');
+    expect(observe).toHaveBeenCalledTimes(3);
+    expect(observe.mock.calls[0]![0]).toBe(1);
+    expect(answer).toHaveBeenCalledWith(1, expect.objectContaining({ question: 'which site?', answer: 'yes' }));
+    expect(action).toHaveBeenCalledWith(2, expect.objectContaining({ tool: 'goto', ok: true }));
+    const llmData = llm.mock.calls[0]![1] as Record<string, unknown>;
+    expect(llmData.toolCalls).toBeDefined();
+    expect(typeof llmData.durationMs).toBe('number');
+  });
+
+  it('records llm errors into telemetry before failing', async () => {
+    const llm = vi.fn(async (_step: number, _data: Record<string, unknown>) => {});
+    const chat = async () => {
+      throw new Error('boom');
+    };
+    await runTask('t', deps({ chat, telemetry: { observe: async () => {}, llm, action: async () => {}, answer: async () => {} } }));
+    expect(llm).toHaveBeenCalledWith(1, expect.objectContaining({ error: 'boom' }));
+  });
 });
 
 describe('StepRecord shape', () => {
