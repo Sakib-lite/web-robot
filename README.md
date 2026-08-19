@@ -5,17 +5,27 @@ Autonomous browser agent for Chrome. Tell it a task in plain language — it ope
 ## Structure
 
 - `extension/` — Chrome extension (MV3): side panel agent loop, content-script page driver
+- `backend/` — NestJS debug API: stores every run in Postgres (`web_robot` db) and serves the full trace per task
 - `frontend/` — reserved (Next.js, if a web UI lands later)
-- `backend/` — reserved (NestJS, if a server lands later)
 
 ## Development
 
 ```
 pnpm install
+pnpm backend    # NestJS telemetry API on :3010 (Postgres at PGHOST, db auto-created)
 pnpm dev        # load extension/.output/chrome-mv3 as unpacked in Chrome
-pnpm test       # 85 unit tests
+pnpm test       # all workspace tests
 pnpm build
 ```
+
+Every task run is recorded in Postgres when the backend is up (default `http://127.0.0.1:3010`, configurable in Settings → Debug backend). After a run, the panel shows a `trace:` id with a link to the debug JSON, or fetch it yourself:
+
+```
+curl http://127.0.0.1:3010/tasks/<task-id>/debug
+curl "http://127.0.0.1:3010/tasks?limit=20"
+```
+
+The debug report contains the task summary, a chronological timeline (page observations with DOM elements, the exact LLM messages and responses, each action with args/result, user answers), and a `failures` list (failed actions, LLM errors, the final failure reason).
 
 LLM access is configured per machine. Copy the env template and fill in your key before building — the value is inlined into the bundle at build time:
 
