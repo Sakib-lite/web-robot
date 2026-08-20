@@ -163,6 +163,30 @@ describe('runTask', () => {
     expect(result.reason).toContain('loop detected');
   });
 
+  it('does not count a click as a repeat when the page state actually changed', async () => {
+    let expanded = false;
+    const snap = () =>
+      snapshot({
+        elements: [{ ref: 'e1', tag: 'button', kind: 'button', name: 'English scores', expanded }],
+        text: expanded ? 'scores expanded' : 'collapsed',
+      });
+    const driver = fakeDriver({
+      snapshot: async () => snap(),
+      act: async () => {
+        expanded = true;
+        return { ok: true, detail: 'clicked e1' };
+      },
+    });
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('click', { ref: 'e1' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('click', { ref: 'e1' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'read the accordion' })]));
+    const result = await runTask('expand and read', deps({ driver, chat }));
+    expect(result.status).toBe('done');
+    expect(chat).toHaveBeenCalledTimes(3);
+  });
+
   it('accumulates extract results into the model context', async () => {
     const chat = vi
       .fn()

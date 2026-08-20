@@ -56,6 +56,7 @@ function describeElement(el: ElementInfo): string {
   const bits = [`[${el.ref}] ${el.kind}`];
   if (el.name) bits.push(`"${el.name.slice(0, 80)}"`);
   if (el.value !== undefined) bits.push(`value="${el.value.slice(0, 60)}"`);
+  if (el.expanded !== undefined) bits.push(el.expanded ? 'expanded' : 'collapsed');
   if (el.options?.length) bits.push(`options=${el.options.slice(0, 10).join('|')}`);
   return bits.join(' ');
 }

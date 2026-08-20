@@ -101,6 +101,7 @@ function optionsFor(el: Element): string[] | undefined {
 }
 
 export function describeElement(el: Element, index: number): ElementInfo {
+  const expanded = el.getAttribute('aria-expanded');
   return {
     ref: `e${index + 1}`,
     tag: el.tagName.toLowerCase(),
@@ -110,6 +111,7 @@ export function describeElement(el: Element, index: number): ElementInfo {
     ...('value' in el || el.getAttribute('contenteditable') === 'true'
       ? { value: valueFor(el) }
       : {}),
+    ...(expanded === 'true' || expanded === 'false' ? { expanded: expanded === 'true' } : {}),
     ...(optionsFor(el)?.length ? { options: optionsFor(el)! } : {}),
   };
 }

@@ -5,6 +5,7 @@ export interface ElementInfo {
   name: string;
   kind: 'link' | 'button' | 'textbox' | 'select' | 'checkbox' | 'radio' | 'other';
   value?: string;
+  expanded?: boolean;
   options?: string[];
 }
 
