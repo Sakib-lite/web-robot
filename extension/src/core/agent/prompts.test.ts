@@ -20,6 +20,8 @@ describe('systemPrompt', () => {
     expect(prompt).toContain('ask_user');
     expect(prompt).toContain('pagination');
     expect(prompt).toContain('markdown');
+    expect(prompt).toContain('scoped failure');
+    expect(prompt).toContain('partial result');
   });
 });
 
