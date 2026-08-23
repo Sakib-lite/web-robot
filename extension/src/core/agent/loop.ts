@@ -61,8 +61,6 @@ function normalizeUrlForCompare(raw: string): string {
 }
 
 function actionKey(action: Action, snapshot: Snapshot | null): string {
-  const actionPart =
-    action.type === 'goto' ? JSON.stringify({ type: 'goto', url: normalizeUrlForCompare(action.url) }) : JSON.stringify(action);
   // page-state fingerprint must catch in-place UI changes (accordion expands,
   // tab switches, text appearing below the fold) or legitimate retries get
   // counted as loops
@@ -74,7 +72,16 @@ function actionKey(action: Action, snapshot: Snapshot | null): string {
         snapshot.elements.map((el) => `${el.ref}:${el.expanded ?? ''}:${el.value ?? ''}`).join(','),
       ].join('|')
     : 'none';
-  return `${actionPart}|${state}`;
+
+  // goto/new_tab to the same url are the same navigation intent - alternating
+  // between them must not evade repeat blocking
+  if (action.type === 'goto') return `nav:${normalizeUrlForCompare(action.url)}|${state}`;
+  if (action.type === 'new_tab') return `nav:${action.url ? normalizeUrlForCompare(action.url) : 'about:blank'}|${state}`;
+  if (action.type === 'switch_tab' || action.type === 'close_tab') return `nav:tab:${action.tabId}|${state}`;
+  // extract ignores the goal wording: re-asking the same page in different
+  // words is the same no-op and must count toward blocking
+  if (action.type === 'extract') return `extract|${state}`;
+  return `${JSON.stringify(action)}|${state}`;
 }
 
 function describeAction(action: Action): string {

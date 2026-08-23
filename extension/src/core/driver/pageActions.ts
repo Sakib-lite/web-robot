@@ -17,7 +17,7 @@ export async function runPageAction(action: Action, resolve: ElementRef, win: Wi
     case 'wait':
       return sleep(action.ms);
     case 'extract':
-      return extractContent();
+      return extractContent(action.goal);
     default:
       return { ok: false, detail: `action ${action.type} is handled by the browser, not the page` };
   }
@@ -33,13 +33,71 @@ export function mainContentText(doc: Document, limit = 6000): string {
     .slice(0, limit);
 }
 
-function extractContent(): Promise<ActionResult> {
-  const text = mainContentText(document);
-  return Promise.resolve(
-    text
-      ? { ok: true, detail: text }
-      : { ok: false, detail: 'no readable text found on this page' },
-  );
+const STOPWORDS = new Set(['the', 'and', 'for', 'with', 'that', 'this', 'from', 'what', 'which', 'any', 'are', 'was', 'has', 'have', 'listed', 'list', 'quote', 'find', 'page', 'section', 'paragraph', 'sentence', 'mention', 'mentions', 'mentioned', 'exact', 'especially', 'after', 'about', 'their', 'them', 'does', 'minimum', 'score', 'scores']);
+
+function goalKeywords(goal: string): string[] {
+  return [...new Set(goal.toLowerCase().split(/[^a-z0-9.]+/).filter((word) => word.length > 1 && !STOPWORDS.has(word)))];
+}
+
+function pageOutline(doc: Document): string {
+  const headings = Array.from(doc.querySelectorAll('h1, h2, h3'))
+    .map((h) => `${h.tagName.toLowerCase()}: ${h.textContent?.trim().slice(0, 90)}`)
+    .filter((line) => line.length > 5);
+  return [...new Set(headings)].slice(0, 25).join('\n');
+}
+
+// goal-aware extraction: return lines matching the goal with context, plus a
+// page outline so the model can see what else exists instead of re-asking
+export function extractForGoal(doc: Document, goal: string): string {
+  const root = doc.querySelector('main, [role="main"], article') ?? doc.body;
+  const fullText = (root?.textContent ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const keywords = goalKeywords(goal);
+  const outline = pageOutline(doc);
+
+  if (keywords.length === 0) {
+    return `PAGE OUTLINE:\n${outline}\n\nTEXT (first 3000 chars):\n${fullText.join('\n').slice(0, 3000)}`;
+  }
+
+  const scored: Array<{ index: number; hits: number }> = [];
+  fullText.forEach((line, index) => {
+    const lower = line.toLowerCase();
+    const hits = keywords.filter((keyword) => lower.includes(keyword)).length;
+    if (hits > 0) scored.push({ index, hits });
+  });
+  scored.sort((a, b) => b.hits - a.hits);
+
+  if (scored.length === 0) {
+    return [
+      `NO TEXT MATCHES YOUR GOAL on this page.`,
+      `PAGE OUTLINE (navigate to a section or try another page):`,
+      outline,
+      `TEXT START:\n${fullText.join('\n').slice(0, 1200)}`,
+    ].join('\n');
+  }
+
+  const chosen = new Set<number>();
+  for (const { index } of scored.slice(0, 12)) {
+    for (let offset = -2; offset <= 2; offset++) {
+      const neighbor = fullText[index + offset];
+      if (neighbor) chosen.add(index + offset);
+    }
+  }
+  const matchLines = [...chosen].sort((a, b) => a - b).map((index) => fullText[index]).join('\n');
+  return `MATCHING TEXT (for: ${goal.slice(0, 80)}):\n${matchLines.slice(0, 3500)}\n\nPAGE OUTLINE:\n${outline}`;
+}
+
+function extractContent(goal: string): Promise<ActionResult> {
+  const root = doc_main();
+  const hasText = (root?.textContent ?? '').trim().length > 0;
+  if (!hasText) return Promise.resolve({ ok: false, detail: 'no readable text found on this page' });
+  return Promise.resolve({ ok: true, detail: extractForGoal(document, goal) });
+}
+
+function doc_main(): Element | null {
+  return document.querySelector('main, [role="main"], article') ?? document.body;
 }
 
 function requireElement(resolve: ElementRef, ref: string): { ok: true; el: Element } | { ok: false; detail: string } {
