@@ -62,6 +62,10 @@ describe('parseCall', () => {
       ok: true,
       call: { kind: 'ask_user', question: 'credentials?' },
     });
+    expect(parseCall('note', { text: 'UIC: PTE 54' })).toEqual({
+      ok: true,
+      call: { kind: 'note', text: 'UIC: PTE 54' },
+    });
   });
 
   it('rejects unknown tools and invalid arguments', () => {

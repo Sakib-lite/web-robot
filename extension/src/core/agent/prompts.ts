@@ -13,7 +13,8 @@ export function systemPrompt(): string {
     '7. When blocked (login, captcha, ambiguity, missing information), call ask_user instead of guessing.',
     '8. For listing tasks across pages: extract on each page, then use the page\'s own pagination controls (e.g. a Next button). Do not edit urls to guess page numbers; stop when there is no next page.',
     '9. extract returns the page text matching your goal plus a page outline. Repeating extract with reworded goals on an unchanged page returns the same nothing - if the answer is not on this page, scroll, follow the outline, or go to a better page instead.',
-    '10. Only call done when the ENTIRE task is complete (every item the user asked for). A partial result is better than giving up: if some targets failed, report what you found and what failed, and still call done. Call fail only when the whole task is impossible. Write the summary in markdown: - bullets for any listing, 1. numbering for ordered items, **bold** for key facts, `backticks` for names and code.',
+    '10. Use note to record every finding the moment you verify it (university: PTE score + source url). Your notes are your working memory: before choosing the next action, read them, list what is still missing, and pick the next target from there. Never re-visit a page whose finding is already in your notes.',
+    '11. Only call done when the ENTIRE task is complete (every item the user asked for). A partial result is better than giving up: if some targets failed, report what you found and what failed, and still call done. Call fail only when the whole task is impossible. Write the summary in markdown: - bullets for any listing, 1. numbering for ordered items, **bold** for key facts, `backticks` for names and code.',
   ].join('\n');
 }
 
@@ -26,8 +27,11 @@ const MAX_LATEST_EXTRACT = 4000;
 const MAX_OLDER_EXTRACT = 150;
 const MAX_EXTRACTS_KEPT = 5;
 
-export function taskContext(task: string, steps: string[], userAnswers: string[], extracts: ExtractRecord[] = []): string {
+export function taskContext(task: string, steps: string[], userAnswers: string[], extracts: ExtractRecord[] = [], notes: string[] = []): string {
   const parts = [`TASK:\n${task}`];
+  if (notes.length > 0) {
+    parts.push(`YOUR NOTES (working memory - findings and plan, most recent last):\n${notes.map((n, i) => `${i + 1}. ${n}`).join('\n')}`);
+  }
   if (steps.length > 0) parts.push(`STEPS SO FAR (oldest first, one line each):\n${steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}`);
   if (userAnswers.length > 0) parts.push(`USER ANSWERS:\n${userAnswers.join('\n')}`);
   if (extracts.length > 0) {
@@ -41,13 +45,19 @@ export function taskContext(task: string, steps: string[], userAnswers: string[]
 
 export function observationBlock(tabs: TabInfo[], snapshot: Snapshot | null): string {
   if (!snapshot) return 'CURRENT PAGE:\n(no accessible page - open one with goto or new_tab)';
-  const tabLines = tabs.map((t) => `${t.active ? '*' : ' '} [${t.id}] ${t.title ?? ''} ${t.url ?? ''}`.trimEnd());
+  // a single star on the tab being driven (matched by url) - multiple stars
+  // across windows confuse which page actions affect
+  const tabLines = tabs.map((t) => {
+    const driven = t.url === snapshot.url ? '*' : ' ';
+    return `${driven} [${t.id}] ${t.title ?? ''} ${t.url ?? ''}`.trimEnd();
+  });
   const elementLines = snapshot.elements.map(describeElement);
   return [
     'CURRENT PAGE:',
     `url: ${snapshot.url}`,
     `title: ${snapshot.title}`,
-    `tabs:\n${tabLines.join('\n')}`,
+    `tabs (the * tab is the page below):`,
+    tabLines.join('\n'),
     `elements:\n${elementLines.join('\n')}`,
     `page text (truncated):\n${snapshot.text}`,
   ].join('\n');

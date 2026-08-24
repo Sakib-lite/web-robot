@@ -56,6 +56,13 @@ async function runBrowserAction(tabId: number | undefined, action: Action, tabsA
     case 'new_tab': {
       const url = action.url ? navigableUrl(action.url) : 'about:blank';
       if (!url) return { ok: false, error: `not a navigable url: ${action.url}` };
+      // reuse an existing tab already at this url instead of stacking
+      // duplicates - agents open the same page repeatedly without this
+      const existing = ((await tabsApi.query({})) ?? []).find((t) => t.url === url && typeof t.id === 'number');
+      if (existing?.id !== undefined) {
+        await tabsApi.update(existing.id, { active: true });
+        return { ok: true, detail: `reused existing tab ${existing.id} at ${url}` };
+      }
       const tab = await tabsApi.create({ url, active: true });
       await sleep(600);
       return { ok: true, detail: `opened tab ${tab.id} at ${url}` };
@@ -90,10 +97,13 @@ export async function handleMessage(message: PanelRequest, apis: BrowserApis): P
   const { tabs: tabsApi, scripting: scriptingApi } = apis;
 
   if (message.type === 'GET_TABS') {
-    const all = await tabsApi.query({});
-    const tabs = (all ?? [])
+    const all = (await tabsApi.query({})) ?? [];
+    // star only the focused window's active tab - one star total, or the
+    // model cannot tell which of several windows it is driving
+    const [focused] = await tabsApi.query({ active: true, lastFocusedWindow: true });
+    const tabs = all
       .filter((t) => (t.url ?? '').startsWith('http') && typeof t.id === 'number')
-      .map((t) => ({ id: t.id as number, url: t.url, title: t.title, active: !!t.active }));
+      .map((t) => ({ id: t.id as number, url: t.url, title: t.title, active: !!focused && t.id === focused.id }));
     return { ok: true, tabs };
   }
 
