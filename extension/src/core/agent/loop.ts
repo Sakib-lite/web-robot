@@ -35,7 +35,7 @@ export interface LoopDeps {
   telemetry?: LoopTelemetry;
 }
 
-const DEFAULT_MAX_STEPS = 60;
+const DEFAULT_MAX_STEPS = 100;
 const LOOP_NUDGE_AT = 3;
 const LOOP_BLOCK_AT = 5;
 const STALL_LIMIT = 6;
@@ -167,6 +167,12 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
         content: `Only ${remaining} steps left. Consolidate: finish verifying only your most promising remaining targets, then call done with the results you have (partial beats failing).`,
       });
     }
+    if (index + 1 === 20 && agentNotes.length === 0) {
+      messages.push({
+        role: 'system',
+        content: 'You have recorded no findings so far. Call note(text) after every verified fact (target: result + source url) - your notes are how you avoid re-doing work.',
+      });
+    }
 
     let res: ChatResponse;
     const chatStarted = Date.now();
@@ -277,9 +283,14 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       detail: result.detail,
       durationMs: Date.now() - actionStarted,
     });
+    if (!result.ok && result.detail.includes('take a new snapshot')) {
+      notes.push('That ref no longer exists - the page changed after your last action. Use refs from the LATEST observation only.');
+    }
     if (result.ok && action.type === 'extract') {
       const text = result.detail;
       extracts.push({ goal: action.goal, text });
+      const digest = text.replace(/\s+/g, ' ').slice(0, 180);
+      agentNotes.push(`auto · ${action.goal.slice(0, 50)} → ${digest}`);
       record(true, describeAction(action), `${text.length} chars extracted`);
     } else {
       record(result.ok, describeAction(action), result.detail);
