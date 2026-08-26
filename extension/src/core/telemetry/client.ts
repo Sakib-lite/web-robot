@@ -1,3 +1,6 @@
+import { runTask } from '../agent/loop';
+import { chatCompletion } from '../llm/chatClient';
+
 export type TelemetryEventType = 'observation' | 'llm_call' | 'action' | 'user_answer';
 
 export interface TelemetryEvent {
@@ -43,17 +46,48 @@ export async function startTelemetry(meta: TaskMeta, backendUrl: string): Promis
   } catch {
     taskId = null;
   }
+  if (!taskId) return disabledTelemetry();
+  return attachTelemetry(taskId, backendUrl);
+}
 
-  const disabled: TaskTelemetry = {
-    taskId: null,
-    observe: async () => {},
-    llm: async () => {},
-    action: async () => {},
-    answer: async () => {},
-    finish: async () => {},
-  };
-  if (!taskId) return disabled;
+const REMOTE_ANSWER = '(remote run: no user available - proceed autonomously, but never take irreversible actions like paying, submitting orders, deleting, or posting)';
 
+// remote runs have no panel: answer ask_user with guidance instead of blocking
+export async function runRemoteTask(
+  taskId: string,
+  taskText: string,
+  backendUrl: string,
+  deps: {
+    provider: import('../llm/providers').LlmProvider;
+    driver: import('../driver/types').Driver;
+    signal?: AbortSignal;
+    maxSteps?: number;
+  },
+): Promise<void> {
+  const telemetry = attachTelemetry(taskId, backendUrl);
+  try {
+    await post(`${backendUrl}/tasks/${taskId}/start`, {
+      product: deps.provider.productId,
+      model: deps.provider.model,
+      effort: deps.provider.thinking ?? 'off',
+    });
+  } catch {
+    // start marker is best-effort
+  }
+
+  const result = await runTask(taskText, {
+    driver: deps.driver,
+    chat: (messages, tools) =>
+      chatCompletion(deps.provider, { messages, tools, maxTokens: 4096, ...(deps.signal ? { signal: deps.signal } : {}) }),
+    askUser: async () => REMOTE_ANSWER,
+    ...(deps.maxSteps ? { maxSteps: deps.maxSteps } : {}),
+    ...(deps.signal ? { signal: deps.signal } : {}),
+    telemetry,
+  });
+  await telemetry.finish(result.status, result.summary, result.reason, result.steps.length);
+}
+
+export function attachTelemetry(taskId: string, backendUrl: string): TaskTelemetry {
   const send = async (event: TelemetryEvent) => {
     try {
       await post(`${backendUrl}/tasks/${taskId}/events`, event);
@@ -75,5 +109,16 @@ export async function startTelemetry(meta: TaskMeta, backendUrl: string): Promis
         // ignore
       }
     },
+  };
+}
+
+function disabledTelemetry(): TaskTelemetry {
+  return {
+    taskId: null,
+    observe: async () => {},
+    llm: async () => {},
+    action: async () => {},
+    answer: async () => {},
+    finish: async () => {},
   };
 }

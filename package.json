@@ -7,6 +7,7 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm --filter @web-robot/extension typecheck",
     "reload": "node scripts/reload.mjs",
+    "task": "node scripts/run-task.mjs",
     "backend": "pnpm --filter @web-robot/backend dev"
   }
 }

@@ -1,0 +1,70 @@
+import { handleMessage } from '../background/router';
+import { createDriver } from '../driver/extensionDriver';
+import { resolveActiveProvider, createProductStore } from '../llm/providers';
+import { chromeArea } from '../storage/area';
+import { runRemoteTask } from '../telemetry/client';
+import { getBackendUrl } from '../telemetry/settings';
+
+export interface RemoteDeps {
+  fetchFn: typeof fetch;
+  reload: () => void;
+  runTask: (taskId: string, taskText: string, backendUrl: string) => Promise<void>;
+  getBackend: () => Promise<string>;
+}
+
+let busy = false;
+
+export async function maybeRunRemoteWork(deps: RemoteDeps): Promise<'idle' | 'reloading' | 'started' | 'busy'> {
+  if (busy) return 'busy';
+  busy = true;
+  try {
+    const backendUrl = await deps.getBackend();
+
+    let control: { reload?: boolean };
+    try {
+      control = (await (await deps.fetchFn(`${backendUrl}/control/reload`)).json()) as { reload?: boolean };
+    } catch {
+      return 'idle';
+    }
+    if (control?.reload) {
+      deps.reload();
+      return 'reloading';
+    }
+
+    let queued: { taskId?: string; taskText?: string };
+    try {
+      queued = (await (await deps.fetchFn(`${backendUrl}/queue/next`)).json()) as { taskId?: string; taskText?: string };
+    } catch {
+      return 'idle';
+    }
+    if (queued?.taskId && queued.taskText) {
+      await deps.runTask(queued.taskId, queued.taskText, backendUrl);
+      return 'started';
+    }
+    return 'idle';
+  } finally {
+    busy = false;
+  }
+}
+
+export function defaultRemoteDeps(): RemoteDeps {
+  return {
+    fetchFn: fetch,
+    reload: () => chrome.runtime.reload(),
+    getBackend: () => getBackendUrl(chromeArea()),
+    runTask: async (taskId, taskText, backendUrl) => {
+      const provider = await resolveActiveProvider(createProductStore(chromeArea()));
+      if (!provider) {
+        await fetch(`${backendUrl}/tasks/${taskId}/finish`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ status: 'failed', reason: 'no llm provider configured', stepCount: 0 }),
+        }).catch(() => undefined);
+        return;
+      }
+      await runRemoteTask(taskId, taskText, backendUrl, {
+        provider,
+        driver: createDriver((message) => handleMessage(message, { tabs: chrome.tabs, scripting: chrome.scripting })),
+      });
+    },};
+}
