@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 
-// queues a task for the extension, waits for it to finish, then prints the
-// failures and the debug url:
+// queues tasks for the extension, waits for each to finish, prints failures + debug url:
 //   node scripts/run-task.mjs "open example.com and tell me the heading"
-//   node scripts/run-task.mjs --reload          # ask the extension to reload itself
+//   node scripts/run-task.mjs --repeat 10 "list my github repos"     # same task 10x, sequentially
+//   node scripts/run-task.mjs --file tasks.txt                       # one task per line, sequentially
+//   node scripts/run-task.mjs --reload                               # ask the extension to reload itself
+
+import { readFileSync } from 'node:fs';
 
 const BACKEND = process.env.WEB_ROBOT_BACKEND ?? 'http://127.0.0.1:3010';
 
@@ -23,6 +26,26 @@ async function get(path) {
   return res.json();
 }
 
+async function runOne(taskText, label) {
+  const { taskId } = await post('/queue', { taskText });
+  const started = Date.now();
+  let status = 'queued';
+  while (status === 'queued' || status === 'running') {
+    ({ status } = await get(`/tasks/wait?id=${taskId}&timeoutMs=600000`));
+  }
+
+  const report = await get(`/tasks/${taskId}/debug`);
+  const seconds = Math.round((Date.now() - started) / 1000);
+  console.log(`\n=== [${label}] ${report.task.status.toUpperCase()} (${seconds}s, ${report.task.stepCount} steps) ===`);
+  if (report.task.summary) console.log(`summary: ${report.task.summary.slice(0, 300)}`);
+  if (report.task.reason) console.log(`reason: ${report.task.reason}`);
+  for (const failure of report.failures.slice(0, 6)) {
+    console.log(`  step ${failure.step} [${failure.kind}] ${failure.what.slice(0, 130)}`);
+  }
+  console.log(`trace: ${BACKEND}/tasks/${taskId}/debug`);
+  return report;
+}
+
 async function main() {
   if (process.argv.includes('--reload')) {
     await post('/control/reload');
@@ -30,35 +53,29 @@ async function main() {
     return;
   }
 
-  const taskText = process.argv[2];
-  if (!taskText) {
-    console.error('usage: node scripts/run-task.mjs "task text" | --reload');
-    process.exit(1);
-  }
+  const repeatIndex = process.argv.indexOf('--repeat');
+  const repeat = repeatIndex >= 0 ? Math.max(1, Number(process.argv[repeatIndex + 1] ?? 1)) : 1;
+  const fileIndex = process.argv.indexOf('--file');
 
-  const { taskId } = await post('/queue', { taskText });
-  console.log(`[web-robot] queued task ${taskId}`);
-  console.log('[web-robot] waiting for the extension to pick it up and finish…');
-
-  const started = Date.now();
-  for (;;) {
-    const { status } = await get(`/tasks/wait?id=${taskId}&timeoutMs=600000`);
-    if (status !== 'timeout') {
-      console.log(`[web-robot] finished after ${Math.round((Date.now() - started) / 1000)}s: ${status}`);
-      break;
+  let taskTexts;
+  if (fileIndex >= 0) {
+    taskTexts = readFileSync(process.argv[fileIndex + 1], 'utf8')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+  } else {
+    const taskText = process.argv.filter((arg, i) => !['--repeat', '--file'].includes(arg) && ![process.argv[repeatIndex + 1], process.argv[fileIndex + 1]].includes(arg))[2];
+    if (!taskText) {
+      console.error('usage: node scripts/run-task.mjs "task" | --repeat N "task" | --file tasks.txt | --reload');
+      process.exit(1);
     }
-    console.log('[web-robot] still running… (10 min timeout hit, continuing to wait)');
+    taskTexts = Array.from({ length: repeat }, () => taskText);
   }
 
-  const report = await get(`/tasks/${taskId}/debug`);
-  console.log(`\n=== ${report.task.status.toUpperCase()} ===`);
-  if (report.task.summary) console.log(`summary: ${report.task.summary}`);
-  if (report.task.reason) console.log(`reason: ${report.task.reason}`);
-  if (report.failures.length > 0) {
-    console.log('\nfailures:');
-    for (const failure of report.failures) console.log(`  step ${failure.step} [${failure.kind}] ${failure.what.slice(0, 140)}`);
+  console.log(`[web-robot] ${taskTexts.length} task(s) queued sequentially - extension runs them one by one, stop anytime with Ctrl+C (queued ones can be drained later)`);
+  for (let i = 0; i < taskTexts.length; i++) {
+    await runOne(taskTexts[i], `${i + 1}/${taskTexts.length}`);
   }
-  console.log(`\nfull trace: ${BACKEND}/tasks/${taskId}/debug`);
 }
 
 main().catch((error) => {
