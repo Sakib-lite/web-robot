@@ -1,5 +1,5 @@
 import { handleMessage } from '../background/router';
-import { createDriver } from '../driver/extensionDriver';
+import { createDriver, createExtensionDriver } from '../driver/extensionDriver';
 import { resolveActiveProvider, createProductStore } from '../llm/providers';
 import { chromeArea } from '../storage/area';
 import { runRemoteTask } from '../telemetry/client';
@@ -48,6 +48,19 @@ export async function maybeRunRemoteWork(deps: RemoteDeps): Promise<'idle' | 're
 }
 
 export function defaultRemoteDeps(): RemoteDeps {
+  return remoteDepsForDriver(() =>
+    createDriver((message) => handleMessage(message, { tabs: chrome.tabs, scripting: chrome.scripting })),
+  );
+}
+
+// panel variant: same worker loop, but the driver talks through normal
+// extension messaging (the panel page provably reaches the backend) - keeps
+// autonomous runs alive while the side panel is open
+export function panelRemoteDeps(): RemoteDeps {
+  return remoteDepsForDriver(() => createExtensionDriver());
+}
+
+function remoteDepsForDriver(makeDriver: () => ReturnType<typeof createDriver>): RemoteDeps {
   return {
     fetchFn: fetch,
     reload: () => chrome.runtime.reload(),
@@ -62,9 +75,7 @@ export function defaultRemoteDeps(): RemoteDeps {
         }).catch(() => undefined);
         return;
       }
-      await runRemoteTask(taskId, taskText, backendUrl, {
-        provider,
-        driver: createDriver((message) => handleMessage(message, { tabs: chrome.tabs, scripting: chrome.scripting })),
-      });
-    },};
+      await runRemoteTask(taskId, taskText, backendUrl, { provider, driver: makeDriver() });
+    },
+  };
 }
