@@ -323,3 +323,10 @@ button.danger {
   padding: 2px 8px;
   border-radius: 999px;
 }
+
+.backend-state {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  word-break: break-all;
+}
