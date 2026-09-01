@@ -22,7 +22,9 @@ export async function maybeRunRemoteWork(deps: RemoteDeps): Promise<'idle' | 're
 
     let control: { reload?: boolean };
     try {
-      control = (await (await deps.fetchFn(`${backendUrl}/control/reload`)).json()) as { reload?: boolean };
+      control = (await (await deps.fetchFn(`${backendUrl}/control/reload`, { signal: AbortSignal.timeout(4000) })).json()) as {
+        reload?: boolean;
+      };
     } catch {
       return 'idle';
     }
@@ -33,7 +35,10 @@ export async function maybeRunRemoteWork(deps: RemoteDeps): Promise<'idle' | 're
 
     let queued: { taskId?: string; taskText?: string };
     try {
-      queued = (await (await deps.fetchFn(`${backendUrl}/queue/next`)).json()) as { taskId?: string; taskText?: string };
+      queued = (await (await deps.fetchFn(`${backendUrl}/queue/next`, { signal: AbortSignal.timeout(4000) })).json()) as {
+        taskId?: string;
+        taskText?: string;
+      };
     } catch {
       return 'idle';
     }

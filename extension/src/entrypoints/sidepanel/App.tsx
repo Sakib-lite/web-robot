@@ -27,11 +27,15 @@ export default function App() {
           setBackendState(`backend unreachable · ${url} · ${error instanceof Error ? error.message : String(error)}`);
         }
       }
+      let outcome = '?';
       try {
-        const outcome = await maybeRunRemoteWork(baseDeps.current);
-        if (!cancelled && outcome === 'started') setRemoteState('claimed a queued task');
+        outcome = await maybeRunRemoteWork(baseDeps.current);
       } catch (error) {
-        if (!cancelled) setBackendState(`worker error · ${error instanceof Error ? error.message : String(error)}`);
+        outcome = `worker threw: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      if (!cancelled) {
+        setBackendState((prev) => (prev.startsWith('backend unreachable') || prev.startsWith('worker') ? prev : `backend ok · ${url} · worker: ${outcome}`));
+        if (outcome === 'started') setRemoteState('claimed a queued task');
       }
     }
 
