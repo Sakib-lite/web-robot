@@ -14,7 +14,7 @@ export interface RemoteDeps {
 
 let busy = false;
 
-export async function maybeRunRemoteWork(deps: RemoteDeps): Promise<'idle' | 'reloading' | 'started' | 'busy'> {
+export async function maybeRunRemoteWork(deps: RemoteDeps): Promise<string> {
   if (busy) return 'busy';
   busy = true;
   try {
@@ -22,11 +22,10 @@ export async function maybeRunRemoteWork(deps: RemoteDeps): Promise<'idle' | 're
 
     let control: { reload?: boolean };
     try {
-      control = (await (await deps.fetchFn(`${backendUrl}/control/reload`, { signal: AbortSignal.timeout(4000) })).json()) as {
-        reload?: boolean;
-      };
-    } catch {
-      return 'idle';
+      const res = await deps.fetchFn(`${backendUrl}/control/reload?src=worker`, { signal: AbortSignal.timeout(4000) });
+      control = (await res.json()) as { reload?: boolean };
+    } catch (error) {
+      return `idle (control fetch failed: ${error instanceof Error ? error.message : String(error)})`;
     }
     if (control?.reload) {
       deps.reload();
@@ -35,18 +34,16 @@ export async function maybeRunRemoteWork(deps: RemoteDeps): Promise<'idle' | 're
 
     let queued: { taskId?: string; taskText?: string };
     try {
-      queued = (await (await deps.fetchFn(`${backendUrl}/queue/next`, { signal: AbortSignal.timeout(4000) })).json()) as {
-        taskId?: string;
-        taskText?: string;
-      };
-    } catch {
-      return 'idle';
+      const res = await deps.fetchFn(`${backendUrl}/queue/next?src=worker`, { signal: AbortSignal.timeout(4000) });
+      queued = (await res.json()) as { taskId?: string; taskText?: string };
+    } catch (error) {
+      return `idle (queue fetch failed: ${error instanceof Error ? error.message : String(error)})`;
     }
     if (queued?.taskId && queued.taskText) {
       await deps.runTask(queued.taskId, queued.taskText, backendUrl);
       return 'started';
     }
-    return 'idle';
+    return `idle (queue empty)`;
   } finally {
     busy = false;
   }

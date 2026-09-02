@@ -25,7 +25,7 @@ describe('maybeRunRemoteWork', () => {
     const fetchFn = (async () => {
       throw new Error('connection refused');
     }) as unknown as typeof fetch;
-    expect(await maybeRunRemoteWork(deps({ fetchFn }))).toBe('idle');
+    expect(await maybeRunRemoteWork(deps({ fetchFn }))).toContain('control fetch failed');
   });
 
   it('reloads when the backend requests it', async () => {
@@ -51,7 +51,7 @@ describe('maybeRunRemoteWork', () => {
       '/control/reload': { reload: false },
       '/queue/next': {},
     });
-    expect(await maybeRunRemoteWork(deps({ fetchFn, runTask }))).toBe('idle');
+    expect(await maybeRunRemoteWork(deps({ fetchFn, runTask }))).toBe('idle (queue empty)');
     expect(runTask).not.toHaveBeenCalled();
   });
 
