@@ -64,7 +64,9 @@ export function panelRemoteDeps(): RemoteDeps {
 
 function remoteDepsForDriver(makeDriver: () => ReturnType<typeof createDriver>): RemoteDeps {
   return {
-    fetchFn: fetch,
+    // fetch must be wrapped: storing the naked global and calling it later
+    // detaches it from its receiver and Chrome throws "Illegal invocation"
+    fetchFn: (url, init) => fetch(url, init),
     reload: () => chrome.runtime.reload(),
     getBackend: () => getBackendUrl(chromeArea()),
     runTask: async (taskId, taskText, backendUrl) => {
