@@ -51,11 +51,13 @@ export default function App() {
     const deps = {
       ...baseDeps.current,
       runTask: async (taskId: string, taskText: string, backendUrl: string) => {
-        setRemoteState(`running queued task: ${taskText.slice(0, 40)}`);
+        setRemoteState(`claimed queued task: ${taskText.slice(0, 50)}`);
         try {
           await baseDeps.current.runTask(taskId, taskText, backendUrl);
-        } finally {
-          setRemoteState('idle');
+          setRemoteState(`task finished · trace ${taskId.slice(0, 8)}`);
+        } catch (error) {
+          setRemoteState(`claim error (stays until next claim): ${error instanceof Error ? error.message : String(error)}`);
+          throw error;
         }
       },
     };
