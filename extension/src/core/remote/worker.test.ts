@@ -12,6 +12,7 @@ function jsonResponder(routes: Record<string, unknown>) {
 
 function deps(over: Partial<RemoteDeps> = {}): RemoteDeps {
   return {
+    source: 'test',
     fetchFn: jsonResponder({}),
     reload: vi.fn(),
     getBackend: async () => 'http://backend.test',

@@ -1,9 +1,11 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Logger, Post, Query } from '@nestjs/common';
 import { QueueService } from './queue.service';
 import { DbService } from './db.service';
 
 @Controller()
 export class QueueController {
+  private readonly logger = new Logger('queue');
+
   constructor(
     private readonly queue: QueueService,
     private readonly db: DbService,
@@ -16,8 +18,12 @@ export class QueueController {
   }
 
   @Get('queue/next')
-  next() {
-    return this.queue.next() ?? {};
+  next(@Query('src') src?: string) {
+    const claimed = this.queue.next();
+    if (claimed) {
+      this.logger.log(`CLAIMED by ${src ?? 'unknown'}: ${claimed.taskId} "${claimed.taskText.slice(0, 60)}"`);
+    }
+    return claimed ?? {};
   }
 
   @Get('queue/depth')

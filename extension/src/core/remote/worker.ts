@@ -6,6 +6,7 @@ import { runRemoteTask } from '../telemetry/client';
 import { getBackendUrl } from '../telemetry/settings';
 
 export interface RemoteDeps {
+  source: string;
   fetchFn: typeof fetch;
   reload: () => void;
   runTask: (taskId: string, taskText: string, backendUrl: string) => Promise<void>;
@@ -22,7 +23,7 @@ export async function maybeRunRemoteWork(deps: RemoteDeps): Promise<string> {
 
     let control: { reload?: boolean };
     try {
-      const res = await deps.fetchFn(`${backendUrl}/control/reload?src=worker`, { signal: AbortSignal.timeout(4000) });
+      const res = await deps.fetchFn(`${backendUrl}/control/reload?src=${deps.source}`, { signal: AbortSignal.timeout(4000) });
       control = (await res.json()) as { reload?: boolean };
     } catch (error) {
       return `idle (control fetch failed: ${error instanceof Error ? error.message : String(error)})`;
@@ -34,7 +35,7 @@ export async function maybeRunRemoteWork(deps: RemoteDeps): Promise<string> {
 
     let queued: { taskId?: string; taskText?: string };
     try {
-      const res = await deps.fetchFn(`${backendUrl}/queue/next?src=worker`, { signal: AbortSignal.timeout(4000) });
+      const res = await deps.fetchFn(`${backendUrl}/queue/next?src=${deps.source}`, { signal: AbortSignal.timeout(4000) });
       queued = (await res.json()) as { taskId?: string; taskText?: string };
     } catch (error) {
       return `idle (queue fetch failed: ${error instanceof Error ? error.message : String(error)})`;
@@ -50,8 +51,9 @@ export async function maybeRunRemoteWork(deps: RemoteDeps): Promise<string> {
 }
 
 export function defaultRemoteDeps(): RemoteDeps {
-  return remoteDepsForDriver(() =>
-    createDriver((message) => handleMessage(message, { tabs: chrome.tabs, scripting: chrome.scripting })),
+  return remoteDepsForDriver(
+    () => createDriver((message) => handleMessage(message, { tabs: chrome.tabs, scripting: chrome.scripting })),
+    'sw',
   );
 }
 
@@ -59,11 +61,12 @@ export function defaultRemoteDeps(): RemoteDeps {
 // extension messaging (the panel page provably reaches the backend) - keeps
 // autonomous runs alive while the side panel is open
 export function panelRemoteDeps(): RemoteDeps {
-  return remoteDepsForDriver(() => createExtensionDriver());
+  return remoteDepsForDriver(() => createExtensionDriver(), 'panel');
 }
 
-function remoteDepsForDriver(makeDriver: () => ReturnType<typeof createDriver>): RemoteDeps {
+function remoteDepsForDriver(makeDriver: () => ReturnType<typeof createDriver>, source: string): RemoteDeps {
   return {
+    source,
     // fetch must be wrapped: storing the naked global and calling it later
     // detaches it from its receiver and Chrome throws "Illegal invocation"
     fetchFn: (url, init) => fetch(url, init),
