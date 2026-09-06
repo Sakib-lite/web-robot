@@ -107,7 +107,8 @@ export function createProductStore(area: StorageArea): ProductStore {
 }
 
 export async function seedFromEnv(store: ProductStore, envSeed: LlmProvider | null = ENV_SEED) {
-  await store.area.set({ [LEGACY_KEY]: undefined });
+  // chrome.storage rejects undefined values - null is the clear sentinel
+  await store.area.set({ [LEGACY_KEY]: null });
   if (!envSeed) return;
   const existing = await store.get('glm');
   if (existing) return;

@@ -86,6 +86,6 @@ describe('product store', () => {
     await area.set({ llmProviders: [{ id: 'old', name: 'BigModel' }] });
     const store = createProductStore(area);
     await seedFromEnv(store, null);
-    expect((await area.get('llmProviders'))['llmProviders']).toBeUndefined();
+    expect((await area.get('llmProviders'))['llmProviders']).toBeNull();
   });
 });
