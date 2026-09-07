@@ -48,12 +48,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const deps = {
-      ...baseDeps.current,
+    const unwrapped = baseDeps.current;
+    baseDeps.current = {
+      ...unwrapped,
       runTask: async (taskId: string, taskText: string, backendUrl: string) => {
         setRemoteState(`claimed queued task: ${taskText.slice(0, 50)}`);
         try {
-          await baseDeps.current.runTask(taskId, taskText, backendUrl);
+          await unwrapped.runTask(taskId, taskText, backendUrl);
           setRemoteState(`task finished · trace ${taskId.slice(0, 8)}`);
         } catch (error) {
           setRemoteState(`claim error (stays until next claim): ${error instanceof Error ? error.message : String(error)}`);
@@ -61,7 +62,6 @@ export default function App() {
         }
       },
     };
-    baseDeps.current = deps;
   }, []);
 
   return (
