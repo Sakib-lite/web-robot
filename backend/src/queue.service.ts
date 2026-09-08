@@ -8,10 +8,16 @@ export class QueueService implements OnModuleInit {
 
   constructor(private readonly db: DbService) {}
 
-  // the in-memory queue dies with the process; adopt rows still marked queued
-  // so a backend restart never orphans tasks the extension never saw
   async onModuleInit() {
-    const res = await this.db.pool.query(`SELECT id, task_text FROM tasks WHERE status = 'queued' ORDER BY created_at`);
+    // the in-memory queue dies with the process; adopt rows still marked
+    // queued (or stuck in starting after a crashed claim) so a backend
+    // restart never orphans tasks the extension never ran
+    const res = await this.db.pool.query(
+      `UPDATE tasks SET status='queued'
+       WHERE status IN ('queued', 'starting')
+         AND finished_at IS NULL
+       RETURNING id, task_text`,
+    );
     for (const row of res.rows) {
       this.queue.push({ taskId: row.id, taskText: row.task_text });
     }
@@ -30,8 +36,20 @@ export class QueueService implements OnModuleInit {
     return { taskId };
   }
 
-  next(): { taskId: string; taskText: string } | null {
-    return this.queue.shift() ?? null;
+  async next(): Promise<{ taskId: string; taskText: string } | null> {
+    const fromMemory = this.queue.shift();
+    if (fromMemory) return fromMemory;
+
+    // memory empty: atomically adopt one queued row - self-heals tasks whose
+    // claim died before /start, and SKIP LOCKED keeps concurrent claimers
+    // (panel + service worker) from double-claiming
+    const res = await this.db.pool.query(
+      `UPDATE tasks SET status='starting'
+       WHERE id IN (SELECT id FROM tasks WHERE status='queued' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
+       RETURNING id, task_text`,
+    );
+    const row = res.rows[0];
+    return row ? { taskId: row.id, taskText: row.task_text } : null;
   }
 
   depth(): number {

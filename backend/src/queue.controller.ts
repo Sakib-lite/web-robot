@@ -19,7 +19,7 @@ export class QueueController {
 
   @Get('queue/next')
   next(@Query('src') src?: string) {
-    const claimed = this.queue.next();
+    const claimed = await this.queue.next();
     if (claimed) {
       this.logger.log(`CLAIMED by ${src ?? 'unknown'}: ${claimed.taskId} "${claimed.taskText.slice(0, 60)}"`);
     }
@@ -60,7 +60,7 @@ export class QueueController {
     while (Date.now() < deadline) {
       const res = await this.db.pool.query(`SELECT status FROM tasks WHERE id = $1`, [id]);
       const status = res.rows[0]?.status;
-      if (status && status !== 'queued' && status !== 'running') {
+      if (status && status !== 'queued' && status !== 'starting' && status !== 'running') {
         return { status };
       }
       await new Promise((resolve) => setTimeout(resolve, 2000));
