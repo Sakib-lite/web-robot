@@ -18,7 +18,7 @@ export class QueueController {
   }
 
   @Get('queue/next')
-  next(@Query('src') src?: string) {
+  async next(@Query('src') src?: string) {
     const claimed = await this.queue.next();
     if (claimed) {
       this.logger.log(`CLAIMED by ${src ?? 'unknown'}: ${claimed.taskId} "${claimed.taskText.slice(0, 60)}"`);
