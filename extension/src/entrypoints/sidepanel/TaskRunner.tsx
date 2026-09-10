@@ -35,7 +35,7 @@ export default function TaskRunner({ store }: { store: ProductStore }) {
     abortRef.current = controller;
 
     const chat = (messages: ChatMessage[], tools: ToolDef[]): Promise<ChatResponse> =>
-      chatCompletion(provider, { messages, tools, maxTokens: 4096, signal: controller.signal });
+      chatCompletion(provider, { messages, tools, maxTokens: 8192, signal: controller.signal });
 
     const askUser = async (question: string) => window.prompt(`web-robot asks:\n${question}`);
 

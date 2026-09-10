@@ -27,12 +27,18 @@ const MAX_LATEST_EXTRACT = 4000;
 const MAX_OLDER_EXTRACT = 150;
 const MAX_EXTRACTS_KEPT = 5;
 
+const MAX_STEPS_SHOWN = 30;
+
 export function taskContext(task: string, steps: string[], userAnswers: string[], extracts: ExtractRecord[] = [], notes: string[] = []): string {
   const parts = [`TASK:\n${task}`];
   if (notes.length > 0) {
     parts.push(`YOUR NOTES (working memory - findings and plan, most recent last):\n${notes.map((n, i) => `${i + 1}. ${n}`).join('\n')}`);
   }
-  if (steps.length > 0) parts.push(`STEPS SO FAR (oldest first, one line each):\n${steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}`);
+  if (steps.length > 0) {
+    const omitted = Math.max(0, steps.length - MAX_STEPS_SHOWN);
+    const shown = steps.slice(-MAX_STEPS_SHOWN).map((s, i) => `${omitted + i + 1}. ${s}`);
+    parts.push(`STEPS SO FAR (oldest first${omitted > 0 ? `, first ${omitted} omitted` : ''}):\n${shown.join('\n')}`);
+  }
   if (userAnswers.length > 0) parts.push(`USER ANSWERS:\n${userAnswers.join('\n')}`);
   if (extracts.length > 0) {
     const older = extracts.slice(0, -1).slice(-MAX_EXTRACTS_KEPT + 1);

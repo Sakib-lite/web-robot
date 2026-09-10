@@ -192,11 +192,16 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     });
 
     if (res.toolCalls.length === 0) {
+      const empty = !res.content.trim();
       noToolStrikes++;
-      if (noToolStrikes >= 2) {
-        return { status: 'failed', reason: `model stopped calling tools: ${res.content.slice(0, 200)}`, steps };
+      if (noToolStrikes >= 3) {
+        return { status: 'failed', reason: `model stopped calling tools${empty ? ' (empty replies)' : ''}: ${res.content.slice(0, 200)}`, steps };
       }
-      notes.push('You replied without calling a tool. You must call exactly one tool - done or fail if the task is finished or impossible.');
+      notes.push(
+        empty
+          ? 'Your last reply came back empty. Respond now by calling exactly one tool - done or fail if the task is finished or impossible. Never return a blank message.'
+          : 'You replied without calling a tool. You must call exactly one tool - done or fail if the task is finished or impossible.',
+      );
       continue;
     }
     noToolStrikes = 0;

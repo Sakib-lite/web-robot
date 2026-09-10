@@ -78,7 +78,7 @@ export async function runRemoteTask(
   const result = await runTask(taskText, {
     driver: deps.driver,
     chat: (messages, tools) =>
-      chatCompletion(deps.provider, { messages, tools, maxTokens: 4096, ...(deps.signal ? { signal: deps.signal } : {}) }),
+      chatCompletion(deps.provider, { messages, tools, maxTokens: 8192, ...(deps.signal ? { signal: deps.signal } : {}) }),
     askUser: async () => REMOTE_ANSWER,
     ...(deps.maxSteps ? { maxSteps: deps.maxSteps } : {}),
     ...(deps.signal ? { signal: deps.signal } : {}),

@@ -38,6 +38,15 @@ describe('taskContext', () => {
     expect(taskContext('buy milk', [], [], [])).toBe('TASK:\nbuy milk');
   });
 
+  it('omits old steps beyond thirty to keep context lean', () => {
+    const steps = Array.from({ length: 45 }, (_, i) => `step ${i + 1}`);
+    const context = taskContext('t', steps, [], [], []);
+    expect(context).toContain('first 15 omitted');
+    expect(context).not.toContain('step 1\n');
+    expect(context).toContain('16. step 16');
+    expect(context).toContain('45. step 45');
+  });
+
   it('shows the latest extract in full and older ones as snippets', () => {
     const extracts = [
       { goal: 'page 1 repos', text: 'A'.repeat(300) },

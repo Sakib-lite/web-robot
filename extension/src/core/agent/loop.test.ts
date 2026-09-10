@@ -78,12 +78,16 @@ describe('runTask', () => {
     expect(result).toMatchObject({ status: 'failed', reason: 'login wall' });
   });
 
-  it('nudges once when the model replies with plain text, then fails on the second time', async () => {
+  it('nudges twice on non-tool replies, fails on the third, and names empty replies', async () => {
     const chat = vi.fn().mockResolvedValue(reply('I will just explain...'));
     const result = await runTask('do the thing', deps({ chat }));
     expect(result.status).toBe('failed');
     expect(result.reason).toContain('model stopped calling tools');
-    expect(chat).toHaveBeenCalledTimes(2);
+    expect(chat).toHaveBeenCalledTimes(3);
+
+    const empty = vi.fn().mockResolvedValue(reply(''));
+    const emptyResult = await runTask('do the thing', deps({ chat: empty }));
+    expect(emptyResult.reason).toContain('empty replies');
   });
 
   it('asks the user and feeds the answer back into the loop', async () => {
