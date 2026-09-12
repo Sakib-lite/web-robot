@@ -17,6 +17,8 @@ function deps(over: Partial<RemoteDeps> = {}): RemoteDeps {
     reload: vi.fn(),
     getBackend: async () => 'http://backend.test',
     runTask: vi.fn(async () => {}),
+    getWorkerEnabled: async () => true,
+    saveWorkerEnabled: vi.fn(async () => {}),
     ...over,
   };
 }
@@ -54,6 +56,47 @@ describe('maybeRunRemoteWork', () => {
     });
     expect(await maybeRunRemoteWork(deps({ fetchFn, runTask }))).toBe('idle (queue empty)');
     expect(runTask).not.toHaveBeenCalled();
+  });
+
+  it('stays off when disabled in settings and reports that to the backend', async () => {
+    const runTask = vi.fn(async () => {});
+    const posts: string[] = [];
+    const fetchFn = jsonResponder({
+      '/control/reload': { reload: false },
+      '/queue/next': { taskId: 'abc', taskText: 'should not run' },
+    });
+    const wrapped = (async (url: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === 'POST' && String(url).includes('/worker/status')) posts.push(String(init.body));
+      return fetchFn(url, init);
+    }) as unknown as typeof fetch;
+    expect(await maybeRunRemoteWork(deps({ fetchFn: wrapped, runTask, getWorkerEnabled: async () => false }))).toBe('off (disabled in settings)');
+    expect(runTask).not.toHaveBeenCalled();
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toContain('"state":"off"');
+  });
+
+  it('applies a disable command from the backend to settings', async () => {
+    const runTask = vi.fn(async () => {});
+    let enabled = true;
+    const fetchFn = jsonResponder({
+      '/control/reload': { reload: false, workerEnabled: false },
+      '/queue/next': { taskId: 'abc', taskText: 'should not run' },
+    });
+    expect(await maybeRunRemoteWork(deps({ fetchFn, runTask, getWorkerEnabled: async () => enabled, saveWorkerEnabled: async (v) => { enabled = v; } }))).toBe('off (disabled in settings)');
+    expect(enabled).toBe(false);
+    expect(runTask).not.toHaveBeenCalled();
+  });
+
+  it('applies an enable command from the backend and resumes claiming', async () => {
+    const runTask = vi.fn(async () => {});
+    let enabled = false;
+    const fetchFn = jsonResponder({
+      '/control/reload': { reload: false, workerEnabled: true },
+      '/queue/next': { taskId: 'abc', taskText: 'run me' },
+    });
+    expect(await maybeRunRemoteWork(deps({ fetchFn, runTask, getWorkerEnabled: async () => enabled, saveWorkerEnabled: async (v) => { enabled = v; } }))).toBe('started');
+    expect(enabled).toBe(true);
+    expect(runTask).toHaveBeenCalledWith('abc', 'run me', 'http://backend.test');
   });
 
   it('never runs two tasks concurrently', async () => {

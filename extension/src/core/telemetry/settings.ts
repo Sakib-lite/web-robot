@@ -11,3 +11,14 @@ export async function getBackendUrl(area: StorageArea = chromeArea()): Promise<s
 export async function saveBackendUrl(url: string, area: StorageArea = chromeArea()) {
   await area.set({ [KEY]: url.trim().replace(/\/+$/, '') });
 }
+
+const WORKER_KEY = 'remoteWorkerEnabled';
+
+export async function isRemoteWorkerEnabled(area: StorageArea = chromeArea()): Promise<boolean> {
+  const value = (await area.get<boolean>(WORKER_KEY))[WORKER_KEY];
+  return value !== false;
+}
+
+export async function saveRemoteWorkerEnabled(enabled: boolean, area: StorageArea = chromeArea()) {
+  await area.set({ [WORKER_KEY]: enabled });
+}

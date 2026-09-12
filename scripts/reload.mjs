@@ -70,5 +70,14 @@ build();
 if (targets && (await reloadViaDebugger(targets))) {
   log('done');
 } else {
-  manualHint();
+  // no debug port (always the case on the main Chrome profile) - ask the
+  // extension to reboot itself; it polls the backend for this every 10s
+  try {
+    const backend = process.env.WEB_ROBOT_BACKEND ?? 'http://127.0.0.1:3010';
+    await fetch(`${backend}/control/reload`, { method: 'POST' });
+    log('reload requested through the backend - the extension reboots itself within ~10s');
+  } catch {
+    log('backend unreachable, cannot auto-reload');
+    manualHint();
+  }
 }

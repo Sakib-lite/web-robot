@@ -30,7 +30,7 @@ async function runOne(taskText, label) {
   const { taskId } = await post('/queue', { taskText });
   const started = Date.now();
   let status = 'queued';
-  while (status === 'queued' || status === 'running') {
+  while (status === 'queued' || status === 'starting' || status === 'running') {
     ({ status } = await get(`/tasks/wait?id=${taskId}&timeoutMs=600000`));
   }
 
@@ -52,21 +52,39 @@ async function main() {
     console.log('[web-robot] reload requested - extension reboots itself on next poll');
     return;
   }
+  if (process.argv.includes('--worker')) {
+    const on = !process.argv.includes('off');
+    await post('/worker/control', { enabled: on });
+    console.log(`[web-robot] worker ${on ? 'enabled' : 'disabled'} - the extension applies it on its next poll and the settings toggle follows`);
+    return;
+  }
 
-  const repeatIndex = process.argv.indexOf('--repeat');
-  const repeat = repeatIndex >= 0 ? Math.max(1, Number(process.argv[repeatIndex + 1] ?? 1)) : 1;
-  const fileIndex = process.argv.indexOf('--file');
+  const worker = await get('/worker/status');
+  const alive = Object.entries(worker.sources ?? {}).filter(([, s]) => s.state !== 'off' && s.ageMs < 120000);
+  if (alive.length === 0) {
+    console.error('[web-robot] no live worker: chrome closed or the remote-worker toggle is off in settings - task would just sit queued');
+    console.error('           start chrome with the web-robot extension, or run: node scripts/run-task.mjs --worker on');
+    process.exit(1);
+  }
+  console.log(`[web-robot] worker alive: ${alive.map(([src, s]) => `${src} (${s.state})`).join(', ')}`);
 
+  const args = process.argv.slice(2);
+  const repeatIndex = args.indexOf('--repeat');
+  const repeat = repeatIndex >= 0 ? Math.max(1, Number(args[repeatIndex + 1] ?? 1)) : 1;
+  const fileIndex = args.indexOf('--file');
+
+  const flagsWithValues = new Set(['--repeat', '--file']);
   let taskTexts;
   if (fileIndex >= 0) {
-    taskTexts = readFileSync(process.argv[fileIndex + 1], 'utf8')
+    taskTexts = readFileSync(args[fileIndex + 1], 'utf8')
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean);
   } else {
-    const taskText = process.argv.filter((arg, i) => !['--repeat', '--file'].includes(arg) && ![process.argv[repeatIndex + 1], process.argv[fileIndex + 1]].includes(arg))[2];
+    const positional = args.filter((arg, i) => !arg.startsWith('--') && !(i > 0 && flagsWithValues.has(args[i - 1])));
+    const taskText = positional[0];
     if (!taskText) {
-      console.error('usage: node scripts/run-task.mjs "task" | --repeat N "task" | --file tasks.txt | --reload');
+      console.error('usage: node scripts/run-task.mjs "task" | --repeat N "task" | --file tasks.txt | --reload | --worker on|off');
       process.exit(1);
     }
     taskTexts = Array.from({ length: repeat }, () => taskText);

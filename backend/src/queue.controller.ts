@@ -51,7 +51,31 @@ export class QueueController {
 
   @Get('control/reload')
   consumeReload() {
-    return { reload: this.queue.consumeReload() };
+    const pendingWorker = this.queue.consumeWorkerControl();
+    const response: { reload: boolean; workerEnabled?: boolean } = {
+      reload: this.queue.consumeReload(),
+    };
+    if (pendingWorker !== null) response.workerEnabled = pendingWorker;
+    return response;
+  }
+
+  @Post('worker/control')
+  workerControl(@Body() body: { enabled: boolean }) {
+    if (typeof body.enabled !== 'boolean') throw new Error('enabled (boolean) is required');
+    this.queue.requestWorkerControl(body.enabled);
+    return { pending: true, enabled: body.enabled };
+  }
+
+  @Post('worker/status')
+  workerStatus(@Body() body: { source: string; state: string; currentTask?: string }) {
+    if (!body.source || !body.state) throw new Error('source and state are required');
+    this.queue.reportWorkerStatus(body.source, body.state, body.currentTask);
+    return { ok: true };
+  }
+
+  @Get('worker/status')
+  workerStatusRead() {
+    return this.queue.workerStatus();
   }
 
   @Get('tasks/wait')

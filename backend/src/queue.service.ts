@@ -5,6 +5,11 @@ import { DbService } from './db.service';
 export class QueueService implements OnModuleInit {
   private readonly queue: Array<{ taskId: string; taskText: string }> = [];
   private reloadRequested = false;
+  private pendingWorkerControl: boolean | null = null;
+  private readonly workerStatuses = new Map<
+    string,
+    { state: string; currentTask?: string; ts: number }
+  >();
 
   constructor(private readonly db: DbService) {}
 
@@ -64,5 +69,31 @@ export class QueueService implements OnModuleInit {
     const value = this.reloadRequested;
     this.reloadRequested = false;
     return value;
+  }
+
+  requestWorkerControl(enabled: boolean) {
+    this.pendingWorkerControl = enabled;
+  }
+
+  consumeWorkerControl(): boolean | null {
+    const value = this.pendingWorkerControl;
+    this.pendingWorkerControl = null;
+    return value;
+  }
+
+  reportWorkerStatus(source: string, state: string, currentTask?: string) {
+    this.workerStatuses.set(source, { state, currentTask, ts: Date.now() });
+  }
+
+  workerStatus() {
+    const sources: Record<string, { state: string; currentTask?: string; ageMs: number }> = {};
+    for (const [source, entry] of this.workerStatuses) {
+      sources[source] = {
+        state: entry.state,
+        currentTask: entry.currentTask,
+        ageMs: Date.now() - entry.ts,
+      };
+    }
+    return { sources };
   }
 }

@@ -3,7 +3,7 @@ import { createDriver, createExtensionDriver } from '../driver/extensionDriver';
 import { resolveActiveProvider, createProductStore } from '../llm/providers';
 import { chromeArea } from '../storage/area';
 import { runRemoteTask } from '../telemetry/client';
-import { getBackendUrl } from '../telemetry/settings';
+import { getBackendUrl, isRemoteWorkerEnabled, saveRemoteWorkerEnabled } from '../telemetry/settings';
 
 export interface RemoteDeps {
   source: string;
@@ -11,6 +11,8 @@ export interface RemoteDeps {
   reload: () => void;
   runTask: (taskId: string, taskText: string, backendUrl: string) => Promise<void>;
   getBackend: () => Promise<string>;
+  getWorkerEnabled: () => Promise<boolean>;
+  saveWorkerEnabled: (enabled: boolean) => Promise<void>;
 }
 
 let busy = false;
@@ -21,10 +23,10 @@ export async function maybeRunRemoteWork(deps: RemoteDeps): Promise<string> {
   try {
     const backendUrl = await deps.getBackend();
 
-    let control: { reload?: boolean };
+    let control: { reload?: boolean; workerEnabled?: boolean };
     try {
       const res = await deps.fetchFn(`${backendUrl}/control/reload?src=${deps.source}`, { signal: AbortSignal.timeout(4000) });
-      control = (await res.json()) as { reload?: boolean };
+      control = (await res.json()) as { reload?: boolean; workerEnabled?: boolean };
     } catch (error) {
       return `idle (control fetch failed: ${error instanceof Error ? error.message : String(error)})`;
     }
@@ -32,6 +34,26 @@ export async function maybeRunRemoteWork(deps: RemoteDeps): Promise<string> {
       deps.reload();
       return 'reloading';
     }
+
+    const heartbeat = (state: string) =>
+      deps.fetchFn(`${backendUrl}/worker/status`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ source: deps.source, state }),
+        signal: AbortSignal.timeout(4000),
+      }).catch(() => undefined);
+
+    // a pending control from the backend wins: apply it to storage so the
+    // settings toggle reflects it on the next read
+    const localEnabled = await deps.getWorkerEnabled();
+    if (typeof control?.workerEnabled === 'boolean' && control.workerEnabled !== localEnabled) {
+      await deps.saveWorkerEnabled(control.workerEnabled);
+    }
+    if (!(await deps.getWorkerEnabled())) {
+      await heartbeat('off');
+      return 'off (disabled in settings)';
+    }
+    await heartbeat('idle');
 
     let queued: { taskId?: string; taskText?: string };
     try {
@@ -72,6 +94,8 @@ function remoteDepsForDriver(makeDriver: () => ReturnType<typeof createDriver>, 
     fetchFn: (url, init) => fetch(url, init),
     reload: () => chrome.runtime.reload(),
     getBackend: () => getBackendUrl(chromeArea()),
+    getWorkerEnabled: () => isRemoteWorkerEnabled(chromeArea()),
+    saveWorkerEnabled: (enabled) => saveRemoteWorkerEnabled(enabled, chromeArea()),
     runTask: async (taskId, taskText, backendUrl) => {
       const provider = await resolveActiveProvider(createProductStore(chromeArea()));
       if (!provider) {

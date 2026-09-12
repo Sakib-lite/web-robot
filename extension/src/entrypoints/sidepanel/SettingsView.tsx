@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { chatCompletion } from '@/core/llm/chatClient';
 import { allProducts, type Effort, type ProductId } from '@/core/llm/products';
 import type { LlmProvider, ProductStore, StoredProductConfig } from '@/core/llm/providers';
-import { DEFAULT_BACKEND_URL, getBackendUrl, saveBackendUrl } from '@/core/telemetry/settings';
+import { DEFAULT_BACKEND_URL, getBackendUrl, isRemoteWorkerEnabled, saveBackendUrl, saveRemoteWorkerEnabled } from '@/core/telemetry/settings';
 
 interface CardState {
   apiKey: string;
@@ -50,11 +50,13 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
   const [testState, setTestState] = useState<TestState>(null);
   const [testing, setTesting] = useState(false);
   const [backend, setBackend] = useState(DEFAULT_BACKEND_URL);
+  const [workerOn, setWorkerOn] = useState(true);
   const dirty = useRef(new Set<ProductId>());
 
   useEffect(() => {
     void (async () => {
       setBackend(await getBackendUrl());
+      setWorkerOn(await isRemoteWorkerEnabled());
       await refresh();
     })();
   }, [refresh]);
@@ -262,6 +264,24 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
           </button>
           {testState?.productId === 'generic' && <span className={testState.ok ? 'note ok' : 'note err'}>{testState.message}</span>}
         </div>
+      </section>
+
+      <section>
+        <h2>Remote worker</h2>
+        <p className="muted small">
+          Lets queued tasks from the debug backend run automatically in this browser. Turn off and the agent never claims work on its own.
+        </p>
+        <label className="row">
+          <input
+            type="checkbox"
+            checked={workerOn}
+            onChange={async (e) => {
+              setWorkerOn(e.target.checked);
+              await saveRemoteWorkerEnabled(e.target.checked);
+            }}
+          />
+          run queued tasks automatically
+        </label>
       </section>
     </div>
   );
