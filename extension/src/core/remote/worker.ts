@@ -13,6 +13,7 @@ export interface RemoteDeps {
   getBackend: () => Promise<string>;
   getWorkerEnabled: () => Promise<boolean>;
   saveWorkerEnabled: (enabled: boolean) => Promise<void>;
+  showPanel: () => Promise<void>;
 }
 
 let busy = false;
@@ -63,6 +64,7 @@ export async function maybeRunRemoteWork(deps: RemoteDeps): Promise<string> {
       return `idle (queue fetch failed: ${error instanceof Error ? error.message : String(error)})`;
     }
     if (queued?.taskId && queued.taskText) {
+      await deps.showPanel().catch(() => undefined);
       await deps.runTask(queued.taskId, queued.taskText, backendUrl);
       return 'started';
     }
@@ -96,6 +98,7 @@ function remoteDepsForDriver(makeDriver: () => ReturnType<typeof createDriver>, 
     getBackend: () => getBackendUrl(chromeArea()),
     getWorkerEnabled: () => isRemoteWorkerEnabled(chromeArea()),
     saveWorkerEnabled: (enabled) => saveRemoteWorkerEnabled(enabled, chromeArea()),
+    showPanel: openExtensionPanel,
     runTask: async (taskId, taskText, backendUrl) => {
       const provider = await resolveActiveProvider(createProductStore(chromeArea()));
       if (!provider) {
@@ -109,4 +112,25 @@ function remoteDepsForDriver(makeDriver: () => ReturnType<typeof createDriver>, 
       await runRemoteTask(taskId, taskText, backendUrl, { provider, driver: makeDriver() });
     },
   };
+}
+
+// a remote run should be visible without the user clicking the toolbar icon;
+// the real side panel needs a user gesture, so fall back to the panel page
+// as a tab (which the service worker may always open)
+export async function openExtensionPanel(): Promise<void> {
+  try {
+    const windowId = (await chrome.windows.getLastFocused()).id;
+    await chrome.sidePanel.open({ windowId });
+    return;
+  } catch {
+    // gesture error - continue with the tab fallback
+  }
+  const url = chrome.runtime.getURL('sidepanel.html');
+  const existing = await chrome.tabs.query({ url });
+  if (existing.length > 0) {
+    await chrome.tabs.update(existing[0].id!, { active: true });
+    if (existing[0].windowId !== undefined) await chrome.windows.update(existing[0].windowId, { focused: true });
+    return;
+  }
+  await chrome.tabs.create({ url });
 }

@@ -19,6 +19,7 @@ function deps(over: Partial<RemoteDeps> = {}): RemoteDeps {
     runTask: vi.fn(async () => {}),
     getWorkerEnabled: async () => true,
     saveWorkerEnabled: vi.fn(async () => {}),
+    showPanel: vi.fn(async () => {}),
     ...over,
   };
 }
@@ -46,6 +47,18 @@ describe('maybeRunRemoteWork', () => {
     });
     expect(await maybeRunRemoteWork(deps({ fetchFn, runTask }))).toBe('started');
     expect(runTask).toHaveBeenCalledWith('abc', 'list repos', 'http://backend.test');
+  });
+
+  it('shows the panel when a task is claimed, even if it fails', async () => {
+    const runTask = vi.fn(async () => {});
+    const showPanel = vi.fn(async () => { throw new Error('gesture required'); });
+    const fetchFn = jsonResponder({
+      '/control/reload': { reload: false },
+      '/queue/next': { taskId: 'abc', taskText: 'list repos' },
+    });
+    expect(await maybeRunRemoteWork(deps({ fetchFn, runTask, showPanel }))).toBe('started');
+    expect(showPanel).toHaveBeenCalledOnce();
+    expect(runTask).toHaveBeenCalledOnce();
   });
 
   it('ignores an empty queue', async () => {
