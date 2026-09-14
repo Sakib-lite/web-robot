@@ -1,6 +1,8 @@
 import type { ChatMessage, ChatResponse, ToolDef } from '../llm/chatClient';
 import type { Action, Driver, Snapshot } from '../driver/types';
-import { parseCall, toolDefs } from './tools';
+import type { LocalPlane } from '../local/plane';
+import { PlaneError } from '../local/plane';
+import { describeLocal, parseCall, toolDefs, type LocalCall } from './tools';
 import { observationBlock, systemPrompt, taskContext } from './prompts';
 
 export interface StepRecord {
@@ -33,6 +35,14 @@ export interface LoopDeps {
   signal?: AbortSignal;
   onStep?: (step: StepRecord) => void;
   telemetry?: LoopTelemetry;
+  workspace?: { plane: LocalPlane; root: string };
+  // ties the run to its PLAN.md scratch file (.web-robot/tasks/<taskId>/) so
+  // an interrupted task resumes instead of restarting from zero
+  taskId?: string;
+  // extra system instructions (a selected skill's body)
+  preamble?: string;
+  // close agent-opened tabs when the run ends (default true)
+  cleanupTabs?: boolean;
 }
 
 const DEFAULT_MAX_STEPS = 100;
@@ -41,6 +51,117 @@ const LOOP_BLOCK_AT = 5;
 const STALL_LIMIT = 6;
 
 const DANGER_PATTERN = /pay|purchase|order|buy|checkout|delete|remove|submit|post|send|confirm/i;
+
+const MAX_LOCAL_CONTEXT = 12000;
+const TAB_BUDGET = 6;
+
+function agentNoteDetail(text: string): string {
+  return text.length > 90 ? `${text.slice(0, 87)}… (saved to PLAN.md)` : `${text} (saved to PLAN.md)`;
+}
+
+export function parsePlanMd(md: string): { milestones: Array<{ text: string; done: boolean }>; findings: string[] } | null {
+  const milestones: Array<{ text: string; done: boolean }> = [];
+  const findings: string[] = [];
+  let section = '';
+  for (const line of md.split('\n')) {
+    if (line.startsWith('## ')) {
+      section = line.slice(3).trim().toLowerCase();
+      continue;
+    }
+    const milestone = /^- \[([ x])\] (.*)$/.exec(line.trim());
+    if (section === 'milestones' && milestone) {
+      milestones.push({ text: milestone[2]!, done: milestone[1] === 'x' });
+      continue;
+    }
+    const finding = /^- (.+)$/.exec(line.trim());
+    if (section === 'findings' && finding && !milestone) findings.push(finding[1]!);
+  }
+  if (milestones.length === 0 && findings.length === 0) return null;
+  return { milestones, findings };
+}
+
+interface LocalOutcome {
+  ok: boolean;
+  detail: string;
+  label?: string;
+  text?: string | null;
+  durationMs: number;
+}
+
+async function runLocal(call: LocalCall, plane: LocalPlane, ledger: Set<string>): Promise<LocalOutcome> {
+  const started = Date.now();
+  const dur = () => Date.now() - started;
+  const norm = (p: string) => p.replace(/^\.\//, '');
+  try {
+    switch (call.op) {
+      case 'list_dir': {
+        const { entries, truncated } = await plane.list(call.path);
+        const text = entries
+          .map((e) => `${e.name}${e.dir ? '/' : ''}${e.dir ? '' : ` · ${e.size ?? '?'} B`}${e.mtime ? ` · ${e.mtime}` : ''}`)
+          .join('\n');
+        return { ok: true, detail: `${entries.length} entries${truncated ? ' (truncated at 200)' : ''}`, label: `list ${call.path ?? '.'}`, text: text || '(empty directory)', durationMs: dur() };
+      }
+      case 'read_file': {
+        const slice = await plane.read(call.path, call.offset, call.limit);
+        ledger.add(norm(call.path));
+        const end = slice.offset + slice.lines.length - 1;
+        const text = slice.lines.map((l) => `${l.n}\t${l.text}`).join('\n');
+        return {
+          ok: true,
+          detail: `lines ${slice.offset}-${end} of ${slice.totalLines}`,
+          label: `${call.path} (lines ${slice.offset}-${end} of ${slice.totalLines})`,
+          text: text || '(empty file)',
+          durationMs: dur(),
+        };
+      }
+      case 'write_file': {
+        if (!ledger.has(norm(call.path))) {
+          // unexplored path: try create-only; an EXISTS reply means the model
+          // is blind-overwriting a file it never read
+          try {
+            const res = await plane.write(call.path, call.content, true);
+            return { ok: true, detail: `created ${call.path} (${res.bytes} bytes)`, text: null, durationMs: dur() };
+          } catch (error) {
+            if (error instanceof PlaneError && error.code === 'EXISTS') {
+              return { ok: false, detail: error.message, text: null, durationMs: dur() };
+            }
+            throw error;
+          }
+        }
+        const res = await plane.write(call.path, call.content);
+        return { ok: true, detail: `wrote ${res.bytes} bytes to ${call.path}`, text: null, durationMs: dur() };
+      }
+      case 'edit_file': {
+        if (!ledger.has(norm(call.path))) {
+          return { ok: false, detail: `blocked: read_file ${call.path} first - blind edits are not allowed`, text: null, durationMs: dur() };
+        }
+        const res = await plane.edit(call.path, call.oldString, call.newString, call.replaceAll);
+        return { ok: true, detail: `replaced ${res.occurrences} occurrence(s) at line ${res.line}`, text: null, durationMs: dur() };
+      }
+      case 'append_file': {
+        const res = await plane.append(call.path, call.text);
+        return { ok: true, detail: `appended ${res.bytes} bytes (file now ${res.totalBytes} bytes)`, text: null, durationMs: dur() };
+      }
+      case 'delete_path': {
+        await plane.delete(call.path);
+        return { ok: true, detail: `deleted ${call.path}`, text: null, durationMs: dur() };
+      }
+      case 'mkdir': {
+        await plane.mkdir(call.path);
+        return { ok: true, detail: `created ${call.path}`, text: null, durationMs: dur() };
+      }
+      case 'exec': {
+        const res = await plane.exec(call.cmd, call.timeoutMs);
+        const summary = `exit ${res.code} (${(res.durationMs / 1000).toFixed(1)}s)${res.timedOut ? ' - TIMED OUT' : ''}`;
+        const text = res.output.trim();
+        return { ok: res.code === 0, detail: summary, label: `exec ${call.cmd.slice(0, 80)}`, text: text ? `${summary}\n${text}` : null, durationMs: dur() };
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, detail: message.slice(0, 300), text: null, durationMs: dur() };
+  }
+}
 
 export function isDangerous(action: Action, snapshot: Snapshot | null): string | null {
   if (action.type !== 'click') return null;
@@ -112,7 +233,7 @@ function describeAction(action: Action): string {
 }
 
 export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult> {
-  const maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS;
+  let maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS;
   const steps: StepRecord[] = [];
   const stepLines: string[] = [];
   const userAnswers: string[] = [];
@@ -120,10 +241,80 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   const agentNotes: string[] = [];
   const repeatCounts = new Map<string, number>();
   const blockedKeys = new Set<string>();
+  // files read this task - edit_file and overwrites are refused until the
+  // model has actually seen the content (ZCode's read-before-edit rule)
+  const readLedger = new Set<string>();
+  // only the latest read/list/exec output stays in context, bounded - older
+  // ones live on in the step log as one-liners
+  let latestLocal: { label: string; text: string } | null = null;
+  // milestone plan + its PLAN.md mirror: written by loop code, not model turns
+  let plan: Array<{ text: string; done: boolean }> | null = null;
+  const planFindings: string[] = [];
+  let planFileInit = false;
+  const planPath = deps.taskId ? `.web-robot/tasks/${deps.taskId}/PLAN.md` : null;
+  // tabs this run opened - marked in observations, budget-capped, closed at end
+  const ownedTabs = new Map<number, string>();
+  let reinvestigations = 0;
   let consecutiveBlocked = 0;
   let notes: string[] = [];
   let noToolStrikes = 0;
   let index = 0;
+
+  async function persistPlan() {
+    if (!deps.workspace || !planPath) return;
+    const md = [
+      `# ${task.slice(0, 120)}`,
+      '',
+      '## Milestones',
+      ...(plan ?? []).map((p) => `${p.done ? '- [x]' : '- [ ]'} ${p.text}`),
+      '',
+      '## Findings',
+      ...planFindings.map((f) => `- ${f}`),
+      '',
+    ].join('\n');
+    try {
+      await deps.workspace.plane.write(planPath, md);
+      planFileInit = true;
+    } catch {
+      // the plan also lives in context; a failed write must not kill the run
+    }
+  }
+
+  async function persistFinding(text: string) {
+    if (!deps.workspace || !planPath) return;
+    if (!planFileInit) {
+      await persistPlan();
+      planFindings.push(text);
+      await persistPlan();
+      return;
+    }
+    planFindings.push(text);
+    try {
+      await deps.workspace.plane.append(planPath, `- ${text}\n`);
+    } catch {
+      // same tolerance as above
+    }
+  }
+
+  // resume-on-reclaim: a re-queued task that already has a PLAN.md restarts
+  // with its milestones and findings instead of from zero
+  if (deps.workspace && planPath) {
+    try {
+      const slice = await deps.workspace.plane.read(planPath, 1, 400);
+      const parsed = parsePlanMd(slice.lines.map((l) => l.text).join('\n'));
+      if (parsed) {
+        plan = parsed.milestones;
+        planFindings.push(...parsed.findings);
+        planFileInit = true;
+        agentNotes.push(...parsed.findings);
+        notes.push(
+          'This run was interrupted and has RESUMED. The milestone plan and findings above are your earlier verified progress: continue from the first unchecked milestone and do NOT redo completed work.',
+        );
+      }
+    } catch {
+      // no plan yet - first run
+    }
+  }
 
   function record(ok: boolean, call: string, detail: string) {
     const step: StepRecord = { index: index + 1, call, detail, ok };
@@ -132,9 +323,78 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     deps.onStep?.(step);
   }
 
+  // failure re-investigation: before accepting any failure, one verdict call
+  // decides resume (with a concrete next instruction + fresh step budget) or
+  // confirmed failure - partial progress beats giving up
+  async function reinvestigate(reason: string): Promise<{ resume: string } | { giveUp: true }> {
+    if (reinvestigations >= 2) return { giveUp: true };
+    reinvestigations++;
+    const context = [
+      `TASK:\n${task}`,
+      plan && plan.length > 0 ? `PLAN:\n${plan.map((p) => `${p.done ? '[x]' : '[ ]'} ${p.text}`).join('\n')}` : '',
+      `STEPS SO FAR (last 15):\n${stepLines.slice(-15).join('\n')}`,
+      `FAILURE:\n${reason}`,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+    const verdictTools: ToolDef[] = [
+      {
+        name: 'resume',
+        description: 'Continue the task from where it failed with a concrete next instruction.',
+        parameters: { type: 'object', properties: { next_instruction: { type: 'string' } }, required: ['next_instruction'] },
+      },
+      {
+        name: 'confirm_fail',
+        description: 'The task is genuinely impossible; finalize it as failed.',
+        parameters: { type: 'object', properties: { reason: { type: 'string' } }, required: ['reason'] },
+      },
+    ];
+    try {
+      const res = await deps.chat(
+        [
+          {
+            role: 'system',
+            content:
+              'A web-robot run just failed. Decide: resume it with a concrete next instruction, or confirm the failure. Prefer resume whenever any progress or any remaining path exists - partial results beat giving up. ',
+          },
+          { role: 'user', content: context },
+        ],
+        verdictTools,
+      );
+      const call = res.toolCalls[0];
+      if (call?.name === 'resume' && typeof call.args.next_instruction === 'string' && call.args.next_instruction.trim()) {
+        return { resume: call.args.next_instruction.trim().slice(0, 400) };
+      }
+      return { giveUp: true };
+    } catch {
+      return { giveUp: true };
+    }
+  }
+
+  async function cleanupOwnedTabs() {
+    if (deps.cleanupTabs === false || ownedTabs.size === 0) return;
+    for (const tabId of [...ownedTabs.keys()]) {
+      try {
+        await deps.driver.act({ type: 'close_tab', tabId });
+      } catch {
+        // already closed by the user - nothing to do
+      }
+    }
+    ownedTabs.clear();
+  }
+
+  try {
   while (true) {
     if (deps.signal?.aborted) return { status: 'stopped', reason: 'cancelled by user', steps };
-    if (index >= maxSteps) return { status: 'failed', reason: `step limit of ${maxSteps} reached`, steps };
+    if (index >= maxSteps) {
+      const verdict = await reinvestigate(`step limit of ${maxSteps} reached`);
+      if ('resume' in verdict) {
+        maxSteps += 25;
+        notes.push(`The step limit hit, but re-investigation granted a fresh budget of 25 more steps. RESUME INSTRUCTION: ${verdict.resume}`);
+        continue;
+      }
+      return { status: 'failed', reason: `step limit of ${maxSteps} reached (confirmed by re-investigation)`, steps };
+    }
 
     let tabs = [] as Awaited<ReturnType<Driver['tabs']>>;
     let snapshot: Snapshot | null = null;
@@ -153,10 +413,11 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     });
 
     const messages: ChatMessage[] = [
-      { role: 'system', content: systemPrompt() },
-      { role: 'user', content: taskContext(task, stepLines, userAnswers, extracts, agentNotes) },
+      { role: 'system', content: systemPrompt(deps.workspace?.root) },
+      ...(deps.preamble ? [{ role: 'system' as const, content: deps.preamble }] : []),
+      { role: 'user', content: taskContext(task, stepLines, userAnswers, extracts, agentNotes, latestLocal, plan) },
       ...notes.map((content) => ({ role: 'system' as const, content })),
-      { role: 'user', content: observationBlock(tabs, snapshot) },
+      { role: 'user', content: observationBlock(tabs, snapshot, Object.fromEntries(ownedTabs)) },
     ];
     notes = [];
 
@@ -177,10 +438,16 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     let res: ChatResponse;
     const chatStarted = Date.now();
     try {
-      res = await deps.chat(messages, toolDefs());
+      res = await deps.chat(messages, toolDefs({ workspace: !!deps.workspace }));
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       await deps.telemetry?.llm(index + 1, { messages, error: reason, durationMs: Date.now() - chatStarted });
+      const verdict = await reinvestigate(`llm error: ${reason}`);
+      if ('resume' in verdict) {
+        maxSteps += 25;
+        notes.push(`The model call failed once, but re-investigation decided to continue. RESUME INSTRUCTION: ${verdict.resume}`);
+        continue;
+      }
       return { status: 'failed', reason: `llm error: ${reason}`, steps };
     }
     await deps.telemetry?.llm(index + 1, {
@@ -219,6 +486,12 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       return { status: 'done', summary: agentCall.summary, ...(agentCall.data !== undefined ? { data: agentCall.data } : {}), steps };
     }
     if (agentCall.kind === 'fail') {
+      const verdict = await reinvestigate(`the model gave up: ${agentCall.reason}`);
+      if ('resume' in verdict) {
+        maxSteps += 25;
+        notes.push(`A give-up verdict was overruled by re-investigation - partial progress exists. RESUME INSTRUCTION: ${verdict.resume}`);
+        continue;
+      }
       return { status: 'failed', reason: agentCall.reason, steps };
     }
     if (agentCall.kind === 'ask_user') {
@@ -237,7 +510,37 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     }
     if (agentCall.kind === 'note') {
       agentNotes.push(agentCall.text);
-      record(true, 'note', agentCall.text.slice(0, 90));
+      await persistFinding(agentCall.text);
+      record(true, 'note', agentNoteDetail(agentCall.text));
+      index++;
+      continue;
+    }
+    if (agentCall.kind === 'plan') {
+      plan = agentCall.items.map((item) => ({ text: item.text, done: item.done === true }));
+      await persistPlan();
+      const done = plan.filter((p) => p.done).length;
+      record(true, 'update_plan', `${done}/${plan.length} milestones done`);
+      index++;
+      continue;
+    }
+    if (agentCall.kind === 'local') {
+      if (!deps.workspace) {
+        record(false, describeLocal(agentCall.call), 'workspace tools unavailable (backend down or workspace disabled)');
+        index++;
+        continue;
+      }
+      const outcome = await runLocal(agentCall.call, deps.workspace.plane, readLedger);
+      if (outcome.text !== null && outcome.text !== undefined) {
+        latestLocal = { label: outcome.label ?? '', text: outcome.text.length > MAX_LOCAL_CONTEXT ? outcome.text.slice(0, MAX_LOCAL_CONTEXT) + '…' : outcome.text };
+      }
+      await deps.telemetry?.action(index + 1, {
+        tool: agentCall.call.op,
+        args: agentCall.call,
+        ok: outcome.ok,
+        detail: outcome.detail,
+        durationMs: outcome.durationMs,
+      });
+      record(outcome.ok, describeLocal(agentCall.call), outcome.detail);
       index++;
       continue;
     }
@@ -261,6 +564,13 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       notes.push('That exact action is blocked on this unchanged page (it did nothing last time). Pick a different element, scroll, extract, or continue with the rest of the task elsewhere.');
       index++;
       if (consecutiveBlocked >= STALL_LIMIT) {
+        const verdict = await reinvestigate(`stalled: ${consecutiveBlocked} consecutive chosen actions were blocked no-ops`);
+        if ('resume' in verdict) {
+          consecutiveBlocked = 0;
+          maxSteps += 25;
+          notes.push(`The run stalled on no-op actions, but re-investigation found a path forward. RESUME INSTRUCTION: ${verdict.resume}`);
+          continue;
+        }
         return { status: 'failed', reason: `stalled: ${consecutiveBlocked} consecutive chosen actions are all blocked no-ops`, steps };
       }
       continue;
@@ -281,6 +591,24 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
 
     const actionStarted = Date.now();
     const result = await deps.driver.act(action);
+    if (action.type === 'new_tab' && result.ok) {
+      const tabId = Number((result.data as { tabId?: number } | undefined)?.tabId);
+      if (Number.isFinite(tabId)) {
+        ownedTabs.set(tabId, new URL(action.url ?? 'about:blank', 'https://x.invalid').hostname || 'blank');
+        if (ownedTabs.size > TAB_BUDGET) {
+          const oldest = ownedTabs.keys().next().value!;
+          ownedTabs.delete(oldest);
+          await deps.driver.act({ type: 'close_tab', tabId: oldest }).catch(() => undefined);
+          notes.push(`Closed your idle agent tab [${oldest}] to stay within the ${TAB_BUDGET}-tab budget.`);
+        }
+      }
+    }
+    if ((action.type === 'switch_tab' || action.type === 'close_tab') && !result.ok) {
+      if (ownedTabs.delete(action.tabId)) {
+        notes.push(`Tab [${action.tabId}] is gone (closed outside the run) - do not use it again.`);
+      }
+    }
+    if (action.type === 'close_tab' && result.ok) ownedTabs.delete(action.tabId);
     await deps.telemetry?.action(index + 1, {
       tool: action.type,
       args: action,
@@ -301,5 +629,8 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       record(result.ok, describeAction(action), result.detail);
     }
     index++;
+  }
+  } finally {
+    await cleanupOwnedTabs();
   }
 }

@@ -19,7 +19,9 @@ export default function App() {
       let url = 'unknown';
       try {
         url = await getBackendUrl();
-        const res = await fetch(`${url}/control/reload`);
+        // /control/reload is consume-once (the worker's reload handshake) -
+        // the health check must never eat that flag, so probe the queue instead
+        const res = await fetch(`${url}/queue/depth`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         if (!cancelled) setBackendState(`backend ok · ${url}`);
       } catch (error) {
@@ -51,10 +53,10 @@ export default function App() {
     const unwrapped = baseDeps.current;
     baseDeps.current = {
       ...unwrapped,
-      runTask: async (taskId: string, taskText: string, backendUrl: string) => {
+      runTask: async (taskId: string, taskText: string, backendUrl: string, skill?: string) => {
         setRemoteState(`claimed queued task: ${taskText.slice(0, 50)}`);
         try {
-          await unwrapped.runTask(taskId, taskText, backendUrl);
+          await unwrapped.runTask(taskId, taskText, backendUrl, skill);
           setRemoteState(`task finished · trace ${taskId.slice(0, 8)}`);
         } catch (error) {
           setRemoteState(`claim error (stays until next claim): ${error instanceof Error ? error.message : String(error)}`);

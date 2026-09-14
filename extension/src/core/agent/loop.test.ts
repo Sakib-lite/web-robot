@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { isDangerous, runTask, type LoopDeps, type StepRecord } from './loop';
 import type { Action, Driver, Snapshot, TabInfo } from '../driver/types';
 import type { ChatResponse, ToolCall } from '../llm/chatClient';
+import { PlaneError } from '../local/plane';
 
 function toolCall(name: string, args: Record<string, unknown>): ToolCall {
   return { id: `c${Math.random().toString(36).slice(2, 6)}`, name, args };
@@ -430,5 +431,259 @@ describe('StepRecord shape', () => {
     const result = await runTask('t', deps({ chat }));
     const indexes = result.steps.map((s: StepRecord) => s.index);
     expect(indexes).toEqual([1]);
+  });
+});
+
+  function fakePlane(over: Partial<import('../local/plane').LocalPlane> = {}) {
+    const files = new Map<string, string>();
+    const plane: import('../local/plane').LocalPlane = {
+      describe: async () => ({ enabled: true, root: '/tmp/robots' }),
+      list: async () => ({ entries: [{ name: 'a.md', dir: false, size: 5 }], truncated: false }),
+      read: async (path, offset = 1, limit = 300) => {
+        const content = files.get(path);
+        if (content === undefined) throw new PlaneError(`"${path}" does not exist`, 'NOT_FOUND');
+        const lines = content.split('\n');
+        return { path, totalLines: lines.length, offset, lines: lines.slice(offset - 1, offset - 1 + limit).map((text, i) => ({ n: offset + i, text })) };
+      },
+      write: async (path, content, onlyIfNew) => {
+        if (onlyIfNew && files.has(path)) throw new PlaneError(`"${path}" already exists (3 lines) - read_file it first`, 'EXISTS');
+        files.set(path, content);
+        return { bytes: content.length };
+      },
+      edit: async (path, oldString, newString) => {
+        const content = files.get(path);
+        if (content === undefined) throw new PlaneError(`"${path}" does not exist`, 'NOT_FOUND');
+        const count = content.split(oldString).length - 1;
+        if (count === 0) throw new PlaneError('old_string not found', 'NO_MATCH');
+        files.set(path, content.replace(oldString, newString));
+        return { line: 2, occurrences: 1 };
+      },
+      append: async (path, text) => {
+        const next = (files.get(path) ?? '') + text;
+        files.set(path, next);
+        return { bytes: text.length, totalBytes: next.length };
+      },
+      delete: async (path) => {
+        files.delete(path);
+        return { path };
+      },
+      mkdir: async (path) => ({ path }),
+      exec: async (cmd) => ({ code: 0, output: `ran: ${cmd}`, timedOut: false, durationMs: 5 }),
+      ...over,
+    };
+    return Object.assign(plane, { files });
+  }
+
+describe('workspace tools', () => {
+  function wsDeps(over: Partial<LoopDeps> & { plane?: import('../local/plane').LocalPlane } = {}): LoopDeps {
+    const { plane, ...rest } = over;
+    return deps({ ...rest, workspace: { plane: plane ?? fakePlane(), root: '/tmp/robots' } });
+  }
+
+  it('creates a new file blind, but blocks overwriting an unread existing file', async () => {
+    const plane = fakePlane();
+    plane.files.set('report.md', 'existing content\nline two\nline three\n');
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('write_file', { path: 'new.md', content: 'fresh' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('write_file', { path: 'report.md', content: 'clobber' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'tried both' })]));
+    const result = await runTask('write files', wsDeps({ chat, plane }));
+
+    expect(result.steps[0]).toMatchObject({ ok: true, call: 'write_file new.md' });
+    expect(result.steps[1]).toMatchObject({ ok: false });
+    expect(result.steps[1]!.detail).toContain('read_file');
+    expect(plane.files.get('report.md')).toBe('existing content\nline two\nline three\n');
+  });
+
+  it('allows editing only after a read, and the read stays in context', async () => {
+    const plane = fakePlane();
+    plane.files.set('report.md', '# Report\nold line\n');
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('edit_file', { path: 'report.md', old_string: 'old line', new_string: 'new line' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('read_file', { path: 'report.md' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('edit_file', { path: 'report.md', old_string: 'old line', new_string: 'new line' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'edited' })]));
+    const result = await runTask('edit the report', wsDeps({ chat, plane }));
+
+    expect(result.steps[0]).toMatchObject({ ok: false });
+    expect(result.steps[0]!.detail).toContain('blind edits');
+    expect(result.steps[2]).toMatchObject({ ok: true, detail: 'replaced 1 occurrence(s) at line 2' });
+    expect(plane.files.get('report.md')).toContain('new line');
+
+    const thirdContext = (chat.mock.calls[2]![0] as import('../llm/chatClient').ChatMessage[]).map((m) => m.content ?? '').join('\n');
+    expect(thirdContext).toContain('LATEST LOCAL RESULT');
+    expect(thirdContext).toContain('old line');
+  });
+
+  it('append accumulates without requiring a read', async () => {
+    const plane = fakePlane();
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('append_file', { path: 'out.md', text: 'one' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('append_file', { path: 'out.md', text: 'two' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'appended' })]));
+    const result = await runTask('grow the report', wsDeps({ chat, plane }));
+    expect(result.steps.every((s) => s.ok)).toBe(true);
+    expect(plane.files.get('out.md')).toBe('onetwo');
+  });
+
+  it('reports exec failures as failed steps but still shows the output', async () => {
+    const plane = fakePlane({ exec: async () => ({ code: 1, output: 'cat: nope.txt: No such file', timedOut: false, durationMs: 3 }) });
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('exec', { cmd: 'cat nope.txt' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'handled' })]));
+    const result = await runTask('read the file', wsDeps({ chat, plane }));
+    expect(result.steps[0]).toMatchObject({ ok: false, detail: 'exit 1 (0.0s)' });
+
+    const secondContext = (chat.mock.calls[1]![0] as import('../llm/chatClient').ChatMessage[]).map((m) => m.content ?? '').join('\n');
+    expect(secondContext).toContain('No such file');
+  });
+
+  it('surfaces a clear failure when workspace tools are called without a plane', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('exec', { cmd: 'ls' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'gave up on files' })]));
+    const result = await runTask('list files', deps({ chat }));
+    expect(result.steps[0]).toMatchObject({ ok: false });
+    expect(result.steps[0]!.detail).toContain('workspace tools unavailable');
+  });
+});
+
+describe('P2: plan + re-investigation + resume', () => {
+  function wsDeps(over: Partial<LoopDeps> & { plane?: import('../local/plane').LocalPlane } = {}, taskId?: string): LoopDeps {
+    const { plane, ...rest } = over;
+    return deps({ ...rest, taskId, workspace: { plane: plane ?? fakePlane(), root: '/tmp/robots' } });
+  }
+
+  it('update_plan persists PLAN.md and the checklist appears in context', async () => {
+    const plane = fakePlane();
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('update_plan', { items: [{ text: 'find rankings' }, { text: 'collect 10 unis', done: false }] })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'x' })]));
+    const result = await runTask('list unis', wsDeps({ chat, plane }, 'task-1'));
+
+    expect(result.status).toBe('done');
+    expect(result.steps[0]!.detail).toContain('0/2 milestones');
+    const plan = plane.files.get('.web-robot/tasks/task-1/PLAN.md') ?? '';
+    expect(plan).toContain('- [ ] find rankings');
+    const context = (chat.mock.calls[1]![0] as import('../llm/chatClient').ChatMessage[]).map((m) => m.content ?? '').join('\n');
+    expect(context).toContain('MILESTONE PLAN');
+    expect(context).toContain('find rankings');
+  });
+
+  it('notes are appended to PLAN.md findings', async () => {
+    const plane = fakePlane();
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('note', { text: 'MIT: faculty at mit.edu/cs' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'x' })]));
+    await runTask('research', wsDeps({ chat, plane }, 'task-2'));
+    const plan = plane.files.get('.web-robot/tasks/task-2/PLAN.md') ?? '';
+    expect(plan).toContain('## Findings');
+    expect(plan).toContain('- MIT: faculty at mit.edu/cs');
+  });
+
+  it('a prior PLAN.md resumes the run with milestones and findings preloaded', async () => {
+    const plane = fakePlane();
+    plane.files.set(
+      '.web-robot/tasks/task-3/PLAN.md',
+      '# list unis\n\n## Milestones\n- [x] find rankings\n- [ ] collect 10 unis\n\n## Findings\n- MIT: faculty at mit.edu/cs\n',
+    );
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'continued' })]));
+    await runTask('list unis', wsDeps({ chat, plane }, 'task-3'));
+
+    const context = (chat.mock.calls[0]![0] as import('../llm/chatClient').ChatMessage[]).map((m) => m.content ?? '').join('\n');
+    expect(context).toContain('RESUMED');
+    expect(context).toContain('find rankings');
+    expect(context).toContain('MIT: faculty at mit.edu/cs');
+  });
+
+  it('a fail verdict is overruled by re-investigation and the run continues', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('fail', { reason: 'too hard' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('resume', { next_instruction: 'try the second site instead' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'recovered' })]));
+    const result = await runTask('do the thing', deps({ chat }));
+
+    expect(result.status).toBe('done');
+    expect(result.summary).toBe('recovered');
+    const resumeContext = (chat.mock.calls[2]![0] as import('../llm/chatClient').ChatMessage[]).map((m) => m.content ?? '').join('\n');
+    expect(resumeContext).toContain('RESUME INSTRUCTION: try the second site instead');
+  });
+
+  it('a confirmed fail verdict finalizes the failure', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('fail', { reason: 'site is down' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('confirm_fail', { reason: 'unreachable' })]));
+    const result = await runTask('do the thing', deps({ chat }));
+    expect(result).toMatchObject({ status: 'failed', reason: 'site is down' });
+  });
+
+  it('a preamble (skill body) is injected as a system message', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'x' })]));
+    await runTask('t', deps({ chat, preamble: 'SKILL "alpha": do it this way.' }));
+    const first = chat.mock.calls[0]![0] as import('../llm/chatClient').ChatMessage[];
+    expect(first.some((m) => m.role === 'system' && m.content?.includes('SKILL "alpha"'))).toBe(true);
+  });
+});
+
+describe('P4: tab ownership', () => {
+  function tabDriver() {
+    let next = 100;
+    const closed: number[] = [];
+    const opened: number[] = [];
+    const driver = fakeDriver({
+      act: async (action) => {
+        if (action.type === 'new_tab') {
+          const id = next++;
+          opened.push(id);
+          return { ok: true, detail: `opened tab ${id}`, data: { tabId: id } };
+        }
+        if (action.type === 'close_tab') {
+          closed.push(action.tabId);
+          return { ok: true, detail: `closed tab ${action.tabId}` };
+        }
+        return { ok: true, detail: 'done' };
+      },
+    });
+    return { driver, closed, opened };
+  }
+
+  it('marks agent tabs, enforces the budget by closing the oldest, and cleans up at the end', async () => {
+    const { driver, closed, opened } = tabDriver();
+    const chat = vi.fn(async () => {
+      const n = chat.mock.calls.length;
+      if (n <= 7) return reply('', [toolCall('new_tab', { url: `https://site${n}.dev/page` })]);
+      return reply('', [toolCall('done', { summary: 'opened a lot' })]);
+    });
+    const result = await runTask('open many tabs', deps({ driver, chat }));
+
+    expect(result.status).toBe('done');
+    expect(opened).toHaveLength(7);
+    // tab 100 (oldest) closed once by the budget rule + all remaining owned tabs at cleanup
+    expect(closed[0]).toBe(100);
+    expect(new Set(closed).size).toBe(closed.length); // no double closes
+    expect(closed.length).toBe(7); // 1 budget eviction + 6 owned at end
+  });
+
+  it('skips cleanup when cleanupTabs is false', async () => {
+    const { driver, closed } = tabDriver();
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('new_tab', { url: 'https://a.dev' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'x' })]));
+    await runTask('t', deps({ driver, chat, cleanupTabs: false }));
+    expect(closed).toEqual([]);
   });
 });

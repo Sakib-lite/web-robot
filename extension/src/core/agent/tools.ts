@@ -6,9 +6,43 @@ export type AgentCall =
   | { kind: 'action'; action: Action }
   | { kind: 'observe' }
   | { kind: 'note'; text: string }
+  | { kind: 'local'; call: LocalCall }
+  | { kind: 'plan'; items: Array<{ text: string; done?: boolean }> }
   | { kind: 'ask_user'; question: string }
   | { kind: 'done'; summary: string; data?: unknown }
   | { kind: 'fail'; reason: string };
+
+// the local workspace tools - present only when a LocalPlane is wired in
+export type LocalCall =
+  | { op: 'list_dir'; path?: string }
+  | { op: 'read_file'; path: string; offset?: number; limit?: number }
+  | { op: 'write_file'; path: string; content: string }
+  | { op: 'edit_file'; path: string; oldString: string; newString: string; replaceAll?: boolean }
+  | { op: 'append_file'; path: string; text: string }
+  | { op: 'delete_path'; path: string }
+  | { op: 'mkdir'; path: string }
+  | { op: 'exec'; cmd: string; timeoutMs?: number };
+
+export function describeLocal(call: LocalCall): string {
+  switch (call.op) {
+    case 'list_dir':
+      return `list_dir ${call.path ?? '.'}`;
+    case 'read_file':
+      return `read_file ${call.path}`;
+    case 'write_file':
+      return `write_file ${call.path}`;
+    case 'edit_file':
+      return `edit_file ${call.path}`;
+    case 'append_file':
+      return `append_file ${call.path}`;
+    case 'delete_path':
+      return `delete_path ${call.path}`;
+    case 'mkdir':
+      return `mkdir ${call.path}`;
+    case 'exec':
+      return `exec ${call.cmd.slice(0, 70)}`;
+  }
+}
 
 interface ToolSpec {
   description: string;
@@ -32,14 +66,27 @@ export const toolSpecs = {
   ask_user: { description: 'Ask the user a question when blocked, or to confirm an irreversible action.', schema: z.object({ question: z.string() }) },
   done: { description: 'Finish the task with a summary written in markdown (use - bullets for lists, 1. numbering for ordered items, **bold** for key facts) and optional extracted data.', schema: z.object({ summary: z.string(), data: z.unknown().optional() }) },
   fail: { description: 'Give up on the task and explain why.', schema: z.object({ reason: z.string() }) },
+  list_dir: { description: 'List a directory in your local workspace (path relative to the workspace root, default "."). Dirs first, with sizes and dates.', schema: z.object({ path: z.string().optional() }) },
+  read_file: { description: 'Read numbered lines from a workspace file. Defaults to the first 300 lines; paginate with offset/limit. Always returns "lines X-Y of N" so you know what is left.', schema: z.object({ path: z.string(), offset: z.number().int().min(1).optional(), limit: z.number().int().min(1).max(1000).optional() }) },
+  write_file: { description: 'Create a new workspace file, or overwrite one you have read_file this task (blind overwrites are blocked). Parent folders are created automatically.', schema: z.object({ path: z.string(), content: z.string() }) },
+  edit_file: { description: 'Replace an exact unique string in a file you have read_file this task. Returns the changed line number, not the file - much cheaper than rewriting.', schema: z.object({ path: z.string(), old_string: z.string().min(1), new_string: z.string(), replace_all: z.boolean().optional() }) },
+  append_file: { description: 'Append text to a workspace file (creates it if missing). The cheap way to grow a report: append each verified batch instead of rewriting the whole file.', schema: z.object({ path: z.string(), text: z.string() }) },
+  delete_path: { description: 'Delete a file or directory tree in the workspace.', schema: z.object({ path: z.string() }) },
+  mkdir: { description: 'Create a workspace directory, with parents.', schema: z.object({ path: z.string() }) },
+  exec: { description: 'Run a shell command inside the workspace (cwd = workspace root; a few catastrophic commands are blocked). Output comes back capped head+tail - pipe through head/tail/grep yourself for big listings.', schema: z.object({ cmd: z.string(), timeout_ms: z.number().int().optional() }) },
+  update_plan: { description: 'Rewrite your milestone checklist for this task (3-6 concrete items). It is persisted to PLAN.md and survives interruptions - a resumed run continues from it. Call it at the start of a multi-step task and check items off as they complete.', schema: z.object({ items: z.array(z.object({ text: z.string(), done: z.boolean().optional() })).min(1) }) },
 } satisfies Record<string, ToolSpec>;
 
-export function toolDefs(): ToolDef[] {
-  return Object.entries(toolSpecs).map(([name, spec]) => ({
-    name,
-    description: spec.description,
-    parameters: jsonSchema(spec.schema),
-  }));
+const LOCAL_TOOLS = new Set(['list_dir', 'read_file', 'write_file', 'edit_file', 'append_file', 'delete_path', 'mkdir', 'exec', 'update_plan']);
+
+export function toolDefs(opts: { workspace?: boolean } = {}): ToolDef[] {
+  return Object.entries(toolSpecs)
+    .filter(([name]) => opts.workspace || !LOCAL_TOOLS.has(name))
+    .map(([name, spec]) => ({
+      name,
+      description: spec.description,
+      parameters: jsonSchema(spec.schema),
+    }));
 }
 
 function jsonSchema(schema: z.ZodType): Record<string, unknown> {
@@ -86,6 +133,55 @@ export function parseCall(name: string, args: Record<string, unknown>): { ok: tr
       return { ok: true, call: { kind: 'action', action: { type: 'extract', goal: String(a.goal) } } };
     case 'snapshot':
       return { ok: true, call: { kind: 'observe' } };
+    case 'list_dir':
+      return { ok: true, call: { kind: 'local', call: { op: 'list_dir', ...(a.path !== undefined ? { path: String(a.path) } : {}) } } };
+    case 'read_file':
+      return {
+        ok: true,
+        call: {
+          kind: 'local',
+          call: {
+            op: 'read_file',
+            path: String(a.path),
+            ...(a.offset !== undefined ? { offset: Number(a.offset) } : {}),
+            ...(a.limit !== undefined ? { limit: Number(a.limit) } : {}),
+          },
+        },
+      };
+    case 'write_file':
+      return { ok: true, call: { kind: 'local', call: { op: 'write_file', path: String(a.path), content: String(a.content) } } };
+    case 'edit_file':
+      return {
+        ok: true,
+        call: {
+          kind: 'local',
+          call: {
+            op: 'edit_file',
+            path: String(a.path),
+            oldString: String(a.old_string),
+            newString: String(a.new_string),
+            ...(a.replace_all !== undefined ? { replaceAll: a.replace_all === true } : {}),
+          },
+        },
+      };
+    case 'append_file':
+      return { ok: true, call: { kind: 'local', call: { op: 'append_file', path: String(a.path), text: String(a.text) } } };
+    case 'delete_path':
+      return { ok: true, call: { kind: 'local', call: { op: 'delete_path', path: String(a.path) } } };
+    case 'mkdir':
+      return { ok: true, call: { kind: 'local', call: { op: 'mkdir', path: String(a.path) } } };
+    case 'exec':
+      return {
+        ok: true,
+        call: { kind: 'local', call: { op: 'exec', cmd: String(a.cmd), ...(a.timeout_ms !== undefined ? { timeoutMs: Number(a.timeout_ms) } : {}) } },
+      };
+    case 'update_plan': {
+      const items = (a.items as Array<Record<string, unknown>>).map((item) => ({
+        text: String(item.text),
+        ...(item.done !== undefined ? { done: item.done === true } : {}),
+      }));
+      return { ok: true, call: { kind: 'plan', items } };
+    }
     case 'note':
       return { ok: true, call: { kind: 'note', text: String(a.text) } };
     case 'ask_user':

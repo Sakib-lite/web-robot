@@ -59,6 +59,12 @@ CREATE TABLE IF NOT EXISTS user_answers (
 );
 `;
 
+// idempotent additions for databases created before the feature landed
+const MIGRATIONS = [
+  `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS skill TEXT`,
+  `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS attempts INT NOT NULL DEFAULT 0`,
+];
+
 @Injectable()
 export class DbService implements OnModuleInit {
   readonly pool: Pool;
@@ -77,6 +83,9 @@ export class DbService implements OnModuleInit {
   async onModuleInit() {
     await this.ensureDatabase();
     await this.pool.query(SCHEMA_SQL);
+    for (const migration of MIGRATIONS) {
+      await this.pool.query(migration);
+    }
   }
 
   private async ensureDatabase() {

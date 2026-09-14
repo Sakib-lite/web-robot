@@ -58,6 +58,12 @@ async function main() {
     console.log(`[web-robot] worker ${on ? 'enabled' : 'disabled'} - the extension applies it on its next poll and the settings toggle follows`);
     return;
   }
+  if (process.argv.includes('--ws')) {
+    const on = !process.argv.includes('off');
+    const res = await post('/workspace/control', { enabled: on });
+    console.log(`[web-robot] workspace tools ${res.enabled ? 'enabled' : 'disabled'} - file/exec tools are ${res.enabled ? 'live again' : 'refused by the backend'}`);
+    return;
+  }
 
   const worker = await get('/worker/status');
   const alive = Object.entries(worker.sources ?? {}).filter(([, s]) => s.state !== 'off' && s.ageMs < 120000);

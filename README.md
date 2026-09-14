@@ -120,6 +120,14 @@ scroll(dir, amount?)  extract(goal)  wait(ms ≤ 5000)  snapshot()
 ask_user(question)  done(summary, data?)  fail(reason)
 ```
 
+Plus, when the backend workspace is enabled, local-hands tools (see below):
+
+```
+list_dir(path?)  read_file(path, offset?, limit?)  write_file(path, content)
+edit_file(path, old_string, new_string, replace_all?)  append_file(path, text)
+delete_path(path)  mkdir(path)  exec(cmd, timeout_ms?)
+```
+
 Loop rules enforced in code:
 
 1. **Refs are only valid in the latest observation.** `e3` after another action means nothing — the model must use the fresh ids.
@@ -130,6 +138,28 @@ Loop rules enforced in code:
 6. **Escalation ladder**: retry → different path → `ask_user` (the panel shows a prompt dialog) — never silent spinning.
 7. **Untrusted page content.** Text from pages is data for locating things, never instructions. Only the user's task directs the agent.
 8. **Danger gate**: submit/pay/delete/post-style clicks require an explicit user yes before executing.
+9. **Read-before-edit** (workspace files): `edit_file` and overwriting an existing file are refused until the model has `read_file`d it — blind edits are impossible by construction.
+
+## Local workspace (the agent's hands outside the browser)
+
+The extension is sandboxed, so local file/command access rides on the backend: a workspace module jails every fs op and shell command to one root folder (`WEB_ROBOT_WORKSPACE`, default `~/robots`). The extension talks to it through a `LocalPlane` interface (`extension/src/core/local/`) — an HTTP transport today, native messaging later if the backend dependency is ever unwanted.
+
+- **Path jail**: all paths are workspace-relative (`research/notes.md`); `..` escapes, absolute paths, and symlink escapes are rejected server-side.
+- **exec**: `bash --noprofile --norc` with cwd pinned inside the workspace, per-command timeout, output capped head+tail (8 KB), and a deny-list for the catastrophic classics (`sudo`, `curl | sh`, `rm -rf /`, `~/.ssh`, …). Everything else runs without permission prompts — that is the point.
+- **Token discipline**: reads are paginated numbered lines ("lines 12–111 of 3,412"), edits return the changed line instead of the file, and only the latest read/exec result stays in context. Append, don't rewrite.
+- **Kill switch**: `node scripts/run-task.mjs --ws on|off` (or Settings → Workspace tools) disables the whole plane server-side; the file tools vanish from the model's toolset on the next run.
+- **Audit**: every fs/exec call lands in the existing `actions` table with full args — visible in `/tasks/:id/debug`.
+
+### Resilience, milestones, skills, tabs (built on top of the workspace)
+
+- **Milestone plans**: multi-step runs keep a `PLAN.md` (`.web-robot/tasks/<id>/`) — milestones the model maintains via `update_plan`, findings auto-appended from every `note`. Written by loop code, not extra LLM turns.
+- **Failure re-investigation**: before any run is accepted as failed (model give-up, step limit, stall, LLM error), one verdict call can `resume` it with a concrete next instruction and a fresh 25-step budget (max 2 rounds). Partial beats failing.
+- **Zombie reaper + resume-on-reclaim**: workers heartbeat `busy` + `currentTask` during runs; a running task whose runner stops heartbeating is requeued after ~90s (3 interruptions → failed with the reason) and the next claim **resumes from PLAN.md** instead of restarting. `POST /tasks/:id/retry` requeues any failed/stopped task with its plan.
+- **Single-flight**: claims are marked busy the instant a task is handed out, so the service worker and panel never run two tasks in parallel.
+- **Skills**: `skills/<slug>/SKILL.md` in the workspace (frontmatter: `name`, `description`, optional `model`/`effort`/`maxSteps`) — picked from a dropdown next to the task input (or `/slug` inline); the body is injected as the run's preamble. The agent can author skills itself with `write_file`.
+- **Tab ownership**: agent-opened tabs are marked `(agent)` in observations, capped at 6 (oldest closed automatically), and closed when the task ends.
+
+Design details and the roadmap are in `docs/rnd-local-agentic-worker.md`.
 
 ## Page access layer
 

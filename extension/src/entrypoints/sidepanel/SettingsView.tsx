@@ -51,6 +51,8 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
   const [testing, setTesting] = useState(false);
   const [backend, setBackend] = useState(DEFAULT_BACKEND_URL);
   const [workerOn, setWorkerOn] = useState(true);
+  const [wsOn, setWsOn] = useState(true);
+  const [wsRoot, setWsRoot] = useState<string | null>(null);
   const dirty = useRef(new Set<ProductId>());
 
   useEffect(() => {
@@ -58,6 +60,16 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
       setBackend(await getBackendUrl());
       setWorkerOn(await isRemoteWorkerEnabled());
       await refresh();
+      try {
+        const res = await fetch(`${await getBackendUrl()}/workspace/status`);
+        if (res.ok) {
+          const status = (await res.json()) as { enabled: boolean; root: string };
+          setWsOn(status.enabled);
+          setWsRoot(status.root);
+        }
+      } catch {
+        // backend down - toggle will show its own error on click
+      }
     })();
   }, [refresh]);
 
@@ -281,6 +293,35 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
             }}
           />
           run queued tasks automatically
+        </label>
+      </section>
+
+      <section>
+        <h2>Workspace tools</h2>
+        <p className="muted small">
+          Lets the agent read/write files and run commands in the local workspace{wsRoot ? ` (${wsRoot})` : ''}, jailed to that folder. Turn off and every file/exec tool is refused by the backend.
+        </p>
+        <label className="row">
+          <input
+            type="checkbox"
+            checked={wsOn}
+            onChange={async (e) => {
+              const next = e.target.checked;
+              setWsOn(next);
+              try {
+                const res = await fetch(`${await getBackendUrl()}/workspace/control`, {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({ enabled: next }),
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+              } catch (error) {
+                setWsOn(!next);
+                setTestState({ productId: 'generic', ok: false, message: `workspace toggle failed: ${error instanceof Error ? error.message : String(error)}` });
+              }
+            }}
+          />
+          allow file and command tools
         </label>
       </section>
     </div>

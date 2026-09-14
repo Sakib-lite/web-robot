@@ -1,7 +1,7 @@
 import type { ElementInfo, Snapshot, TabInfo } from '../driver/types';
 
-export function systemPrompt(): string {
-  return [
+export function systemPrompt(workspaceRoot?: string): string {
+  const rules = [
     'You are web-robot, an agent that completes tasks in the user\'s Chrome browser by calling exactly one tool per turn.',
     'Rules:',
     '1. Element refs (e1, e2, ...) are only valid in the latest observation. Never reuse a ref after another action.',
@@ -15,7 +15,17 @@ export function systemPrompt(): string {
     '9. extract returns the page text matching your goal plus a page outline. Repeating extract with reworded goals on an unchanged page returns the same nothing - if the answer is not on this page, scroll, follow the outline, or go to a better page instead.',
     '10. Use note to record every finding the moment you verify it (university: PTE score + source url). Your notes are your working memory: before choosing the next action, read them, list what is still missing, and pick the next target from there. Never re-visit a page whose finding is already in your notes.',
     '11. Only call done when the ENTIRE task is complete (every item the user asked for). A partial result is better than giving up: if some targets failed, report what you found and what failed, and still call done. Call fail only when the whole task is impossible. Write the summary in markdown: - bullets for any listing, 1. numbering for ordered items, **bold** for key facts, `backticks` for names and code.',
-  ].join('\n');
+  ];
+  if (workspaceRoot) {
+    rules.push(
+      `12. WORKSPACE: you have a local workspace at ${workspaceRoot}. All file tools take paths relative to it (e.g. "research/notes.md"). You can list_dir, read_file (paginated, returns numbered lines), write_file, edit_file, append_file, delete_path, mkdir, and exec shell commands (cwd is the workspace root).`,
+      '13. File discipline: never rewrite a file you can append to or edit - append_file each verified batch. You must read_file a file before editing or overwriting it; edit_file needs the exact old_string from your read. Only your latest read/exec result is kept in full - re-read with offset if you need an older part.',
+      '14. For research/collection tasks: create the deliverable early (write_file with a header), append_file each verified batch, and read_file the tail afterwards to verify formatting. Put deliverables in a "<topic>-<date>/" folder.',
+      '15. exec is jailed to the workspace; a few catastrophic commands are blocked. For big listings pipe through head/tail/grep. Prefer it for counting, transforming, or bulk work you cannot do efficiently with the other tools.',
+      '16. At the start of any multi-step task call update_plan with 3-6 concrete milestones, and check items off (done: true) as you complete them - the plan survives interruptions, so a resumed run skips finished work. If a workflow proved useful, save it as a reusable skill by writing skills/<slug>/SKILL.md (frontmatter keys: name, description, optionally model/effort/maxSteps). Tabs you open are marked (agent) and closed automatically when the task ends.',
+    );
+  }
+  return rules.join('\n');
 }
 
 export interface ExtractRecord {
@@ -29,8 +39,20 @@ const MAX_EXTRACTS_KEPT = 5;
 
 const MAX_STEPS_SHOWN = 30;
 
-export function taskContext(task: string, steps: string[], userAnswers: string[], extracts: ExtractRecord[] = [], notes: string[] = []): string {
+export function taskContext(
+  task: string,
+  steps: string[],
+  userAnswers: string[],
+  extracts: ExtractRecord[] = [],
+  notes: string[] = [],
+  latestLocal: { label: string; text: string } | null = null,
+  plan: Array<{ text: string; done: boolean }> | null = null,
+): string {
   const parts = [`TASK:\n${task}`];
+  if (plan && plan.length > 0) {
+    const done = plan.filter((p) => p.done).length;
+    parts.push(`MILESTONE PLAN (${done}/${plan.length} done - yours, keep current with update_plan; it survives interruptions):\n${plan.map((p) => `${p.done ? '- [x]' : '- [ ]'} ${p.text}`).join('\n')}`);
+  }
   if (notes.length > 0) {
     parts.push(`YOUR NOTES (working memory - findings and plan, most recent last):\n${notes.map((n, i) => `${i + 1}. ${n}`).join('\n')}`);
   }
@@ -40,6 +62,7 @@ export function taskContext(task: string, steps: string[], userAnswers: string[]
     parts.push(`STEPS SO FAR (oldest first${omitted > 0 ? `, first ${omitted} omitted` : ''}):\n${shown.join('\n')}`);
   }
   if (userAnswers.length > 0) parts.push(`USER ANSWERS:\n${userAnswers.join('\n')}`);
+  if (latestLocal) parts.push(`LATEST LOCAL RESULT (${latestLocal.label}):\n${latestLocal.text}`);
   if (extracts.length > 0) {
     const older = extracts.slice(0, -1).slice(-MAX_EXTRACTS_KEPT + 1);
     const latest = extracts[extracts.length - 1]!;
@@ -49,13 +72,15 @@ export function taskContext(task: string, steps: string[], userAnswers: string[]
   return parts.join('\n\n');
 }
 
-export function observationBlock(tabs: TabInfo[], snapshot: Snapshot | null): string {
+export function observationBlock(tabs: TabInfo[], snapshot: Snapshot | null, owned: Record<number, string> = {}): string {
   if (!snapshot) return 'CURRENT PAGE:\n(no accessible page - open one with goto or new_tab)';
   // a single star on the tab being driven (matched by url) - multiple stars
-  // across windows confuse which page actions affect
+  // across windows confuse which page actions affect; (agent) marks tabs this
+  // task opened (they close automatically when the task ends)
   const tabLines = tabs.map((t) => {
     const driven = t.url === snapshot.url ? '*' : ' ';
-    return `${driven} [${t.id}] ${t.title ?? ''} ${t.url ?? ''}`.trimEnd();
+    const ownedMark = owned[t.id] !== undefined ? ' (agent)' : '';
+    return `${driven} [${t.id}]${ownedMark} ${t.title ?? ''} ${t.url ?? ''}`.trimEnd();
   });
   const elementLines = snapshot.elements.map(describeElement);
   return [

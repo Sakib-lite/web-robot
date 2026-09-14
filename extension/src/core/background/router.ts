@@ -64,11 +64,11 @@ async function runBrowserAction(tab: chrome.tabs.Tab | undefined, action: Action
       const existing = ((await tabsApi.query({})) ?? []).find((t) => t.url === url && typeof t.id === 'number');
       if (existing?.id !== undefined) {
         await tabsApi.update(existing.id, { active: true });
-        return { ok: true, detail: `reused existing tab ${existing.id} at ${url}` };
+        return { ok: true, detail: `reused existing tab ${existing.id} at ${url}`, data: { tabId: existing.id } };
       }
       const tab = await tabsApi.create({ url, active: true });
       await sleep(600);
-      return { ok: true, detail: `opened tab ${tab.id} at ${url}` };
+      return { ok: true, detail: `opened tab ${tab.id} at ${url}`, data: { tabId: tab.id } };
     }
     case 'switch_tab': {
       try {

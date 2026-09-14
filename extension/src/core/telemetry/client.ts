@@ -62,6 +62,8 @@ export async function runRemoteTask(
     driver: import('../driver/types').Driver;
     signal?: AbortSignal;
     maxSteps?: number;
+    workspace?: { plane: import('../local/plane').LocalPlane; root: string };
+    preamble?: string;
   },
 ): Promise<void> {
   const telemetry = attachTelemetry(taskId, backendUrl);
@@ -75,15 +77,27 @@ export async function runRemoteTask(
     // start marker is best-effort
   }
 
-  const result = await runTask(taskText, {
-    driver: deps.driver,
-    chat: (messages, tools) =>
-      chatCompletion(deps.provider, { messages, tools, maxTokens: 8192, ...(deps.signal ? { signal: deps.signal } : {}) }),
-    askUser: async () => REMOTE_ANSWER,
-    ...(deps.maxSteps ? { maxSteps: deps.maxSteps } : {}),
-    ...(deps.signal ? { signal: deps.signal } : {}),
-    telemetry,
-  });
+  let result: Awaited<ReturnType<typeof runTask>> | null = null;
+  try {
+    result = await runTask(taskText, {
+      driver: deps.driver,
+      chat: (messages, tools) =>
+        chatCompletion(deps.provider, { messages, tools, maxTokens: 8192, ...(deps.signal ? { signal: deps.signal } : {}) }),
+      askUser: async () => REMOTE_ANSWER,
+      ...(deps.maxSteps ? { maxSteps: deps.maxSteps } : {}),
+      ...(deps.signal ? { signal: deps.signal } : {}),
+      ...(deps.workspace ? { workspace: deps.workspace } : {}),
+      ...(deps.preamble ? { preamble: deps.preamble } : {}),
+      taskId,
+      telemetry,
+    });
+  } catch (error) {
+    // a crashed loop must not leave the row running forever - the reaper
+    // would only resurrect it after a minute; fail it now with the reason
+    const reason = `crashed: ${error instanceof Error ? error.message : String(error)}`;
+    await telemetry.finish('failed', undefined, reason, 0);
+    return;
+  }
   await telemetry.finish(result.status, result.summary, result.reason, result.steps.length);
 }
 

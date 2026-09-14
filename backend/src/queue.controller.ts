@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Logger, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Logger, NotFoundException, Post, Query } from '@nestjs/common';
 import { QueueService } from './queue.service';
 import { DbService } from './db.service';
 
@@ -12,23 +12,36 @@ export class QueueController {
   ) {}
 
   @Post('queue')
-  enqueue(@Body() body: { taskText: string }) {
+  enqueue(@Body() body: { taskText: string; skill?: string }) {
     if (!body.taskText?.trim()) throw new Error('taskText is required');
-    return this.queue.enqueue(body.taskText.trim());
+    return this.queue.enqueue(body.taskText.trim(), body.skill?.trim() || undefined);
   }
 
   @Get('queue/next')
   async next(@Query('src') src?: string) {
-    const claimed = await this.queue.next();
+    const claimed = await this.queue.next(src);
     if (claimed) {
       this.logger.log(`CLAIMED by ${src ?? 'unknown'}: ${claimed.taskId} "${claimed.taskText.slice(0, 60)}"`);
     }
     return claimed ?? {};
   }
 
+  @Post('tasks/:id/retry')
+  async retry(id: string) {
+    const res = await this.queue.retry(id);
+    if (!res.queued) throw new NotFoundException(`task ${id} not found or not in failed/stopped state`);
+    this.logger.log(`RETRY queued: ${id}`);
+    return res;
+  }
+
   @Get('queue/depth')
   depth() {
     return { depth: this.queue.depth() };
+  }
+
+  @Get('queue/reap')
+  reapNow() {
+    return this.queue.reapStaleRuns();
   }
 
   @Post('tasks/:id/start')

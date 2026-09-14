@@ -15,5 +15,5 @@ export type PanelRequest =
   | { type: 'RUN_ACTION'; action: Action };
 
 export type PanelResponse =
-  | { ok: true; tabs?: TabInfo[]; snapshot?: Snapshot; detail?: string }
+  | { ok: true; tabs?: TabInfo[]; snapshot?: Snapshot; detail?: string; data?: unknown }
   | { ok: false; error: string };

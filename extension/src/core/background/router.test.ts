@@ -72,7 +72,7 @@ describe('handleMessage', () => {
       update,
     });
     const res = await handleMessage({ type: 'RUN_ACTION', action: { type: 'new_tab', url: 'https://x.dev/page' } }, { tabs, scripting: fakeScripting() });
-    expect(res).toEqual({ ok: true, detail: 'reused existing tab 7 at https://x.dev/page' });
+    expect(res).toEqual({ ok: true, detail: 'reused existing tab 7 at https://x.dev/page', data: { tabId: 7 } });
     expect(create).not.toHaveBeenCalled();
     expect(update).toHaveBeenCalledWith(7, { active: true });
   });
@@ -146,6 +146,7 @@ describe('handleMessage', () => {
     expect(await handleMessage({ type: 'RUN_ACTION', action: { type: 'new_tab', url: 'https://x.dev' } }, { tabs, scripting: fakeScripting() })).toEqual({
       ok: true,
       detail: 'opened tab 9 at https://x.dev/',
+      data: { tabId: 9 },
     });
     expect(await handleMessage({ type: 'RUN_ACTION', action: { type: 'switch_tab', tabId: 4 } }, { tabs, scripting: fakeScripting() })).toEqual({
       ok: true,
