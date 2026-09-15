@@ -26,8 +26,8 @@ async function get(path) {
   return res.json();
 }
 
-async function runOne(taskText, label) {
-  const { taskId } = await post('/queue', { taskText });
+async function runOne(taskText, label, overrides = {}) {
+  const { taskId } = await post('/queue', { taskText, ...overrides });
   const started = Date.now();
   let status = 'queued';
   while (status === 'queued' || status === 'starting' || status === 'running') {
@@ -79,7 +79,16 @@ async function main() {
   const repeat = repeatIndex >= 0 ? Math.max(1, Number(args[repeatIndex + 1] ?? 1)) : 1;
   const fileIndex = args.indexOf('--file');
 
-  const flagsWithValues = new Set(['--repeat', '--file']);
+  const flagsWithValues = new Set(['--repeat', '--file', '--model', '--effort', '--skill']);
+  const flagValue = (name) => {
+    const i = args.indexOf(name);
+    return i >= 0 ? args[i + 1] : undefined;
+  };
+  const overrides = {};
+  for (const flag of ['model', 'effort', 'skill']) {
+    const value = flagValue(`--${flag}`);
+    if (value) overrides[flag] = value;
+  }
   let taskTexts;
   if (fileIndex >= 0) {
     taskTexts = readFileSync(args[fileIndex + 1], 'utf8')
@@ -90,7 +99,7 @@ async function main() {
     const positional = args.filter((arg, i) => !arg.startsWith('--') && !(i > 0 && flagsWithValues.has(args[i - 1])));
     const taskText = positional[0];
     if (!taskText) {
-      console.error('usage: node scripts/run-task.mjs "task" | --repeat N "task" | --file tasks.txt | --reload | --worker on|off');
+      console.error('usage: node scripts/run-task.mjs "task" | --repeat N "task" | --file tasks.txt | --model glm-5.3 --effort low --skill <slug> | --reload | --worker on|off | --ws on|off');
       process.exit(1);
     }
     taskTexts = Array.from({ length: repeat }, () => taskText);
@@ -98,7 +107,7 @@ async function main() {
 
   console.log(`[web-robot] ${taskTexts.length} task(s) queued sequentially - extension runs them one by one, stop anytime with Ctrl+C (queued ones can be drained later)`);
   for (let i = 0; i < taskTexts.length; i++) {
-    await runOne(taskTexts[i], `${i + 1}/${taskTexts.length}`);
+    await runOne(taskTexts[i], `${i + 1}/${taskTexts.length}`, overrides);
   }
 }
 

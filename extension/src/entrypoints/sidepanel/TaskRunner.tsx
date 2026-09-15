@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { runTask, type StepRecord, type TaskResult } from '@/core/agent/loop';
 import { createExtensionDriver } from '@/core/driver/extensionDriver';
 import { createHttpPlane } from '@/core/local/httpPlane';
 import { chatCompletion, type ChatMessage, type ChatResponse, type ToolDef } from '@/core/llm/chatClient';
-import { resolveActiveProvider, type ProductStore } from '@/core/llm/providers';
+import { resolveActiveProvider, type ProductStore, type StoredProductConfig } from '@/core/llm/providers';
+import { getProduct, type Effort } from '@/core/llm/products';
 import { getBackendUrl } from '@/core/telemetry/settings';
 import { startTelemetry } from '@/core/telemetry/client';
 import ResultView from './ResultView';
@@ -14,10 +15,25 @@ interface SkillOption {
   description: string;
 }
 
-export default function TaskRunner({ store }: { store: ProductStore }) {
+export interface RunState {
+  stepCount: number;
+  snippet: string;
+}
+
+export default function TaskRunner({
+  store,
+  configs,
+  onRunningChange,
+}: {
+  store: ProductStore;
+  configs: StoredProductConfig[] | null;
+  onRunningChange: (state: RunState | null) => void;
+}) {
   const [task, setTask] = useState('');
   const [skills, setSkills] = useState<SkillOption[]>([]);
   const [skill, setSkill] = useState('');
+  const [model, setModel] = useState('');
+  const [effort, setEffort] = useState('');
   const [running, setRunning] = useState(false);
   const [steps, setSteps] = useState<StepRecord[]>([]);
   const [result, setResult] = useState<TaskResult | null>(null);
@@ -25,6 +41,13 @@ export default function TaskRunner({ store }: { store: ProductStore }) {
   const [usingProvider, setUsingProvider] = useState<string | null>(null);
   const [traceInfo, setTraceInfo] = useState<{ taskId: string; backendUrl: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  const activeProduct = useMemo(() => {
+    const active = configs?.find((c) => c.active);
+    return active ? getProduct(active.productId) : null;
+  }, [configs]);
+  const modelOptions = activeProduct?.models ?? [];
+  const effortOptions = activeProduct?.efforts ?? [];
 
   useEffect(() => {
     void (async () => {
@@ -50,20 +73,25 @@ export default function TaskRunner({ store }: { store: ProductStore }) {
       setError('no active llm provider - add one in settings first');
       return;
     }
-    setUsingProvider(`${provider.productId} · ${provider.model}`);
 
     setRunning(true);
+    onRunningChange({ stepCount: 0, snippet: task.slice(0, 60) });
     const controller = new AbortController();
     abortRef.current = controller;
-
-    const chat = (messages: ChatMessage[], tools: ToolDef[]): Promise<ChatResponse> =>
-      chatCompletion(provider, { messages, tools, maxTokens: 8192, signal: controller.signal });
 
     const askUser = async (question: string) => window.prompt(`web-robot asks:\n${question}`);
 
     const backendUrl = await getBackendUrl();
+
+    // per-task model/effort picked in the config bar win; a selected skill
+    // fills only what was not chosen explicitly
+    let runProvider = provider;
+    if (model) runProvider = { ...runProvider, model };
+    if (effort) runProvider = { ...runProvider, thinking: effort as Effort };
+    setUsingProvider(`${runProvider.productId} · ${runProvider.model} · ${runProvider.thinking ?? 'off'}`);
+
     const telemetry = await startTelemetry(
-      { taskText: task, product: provider.productId, model: provider.model, effort: provider.thinking ?? 'off' },
+      { taskText: task, product: runProvider.productId, model: runProvider.model, effort: runProvider.thinking ?? 'off' },
       backendUrl,
     );
     if (telemetry.taskId) setTraceInfo({ taskId: telemetry.taskId, backendUrl });
@@ -73,7 +101,6 @@ export default function TaskRunner({ store }: { store: ProductStore }) {
     const workspaceInfo = await plane.describe().catch(() => null);
     const workspace = workspaceInfo?.enabled ? { plane, root: workspaceInfo.root } : undefined;
 
-    // a selected skill injects its body as a preamble and may override defaults;
     // typing "/slug ..." selects the skill inline
     let selected = skill;
     let taskText = task;
@@ -84,14 +111,13 @@ export default function TaskRunner({ store }: { store: ProductStore }) {
     }
     let preamble: string | undefined;
     let skillMaxSteps: number | undefined;
-    let runProvider = provider;
     if (selected) {
       try {
         const res = await fetch(`${backendUrl}/skills/${encodeURIComponent(selected)}`);
         if (res.ok) {
           const full = (await res.json()) as { name?: string; body?: string; defaults?: Record<string, string> };
-          if (full.defaults?.model) runProvider = { ...runProvider, model: full.defaults.model };
-          if (full.defaults?.effort) runProvider = { ...runProvider, thinking: full.defaults.effort as 'off' | 'low' | 'high' | 'max' };
+          if (full.defaults?.model && !model) runProvider = { ...runProvider, model: full.defaults.model };
+          if (full.defaults?.effort && !effort) runProvider = { ...runProvider, thinking: full.defaults.effort as Effort };
           if (full.defaults?.maxSteps) skillMaxSteps = Number(full.defaults.maxSteps);
           if (full.body) preamble = `SKILL "${full.name ?? selected}" - follow this workflow for the whole task:\n\n${full.body}`.slice(0, 8000);
         }
@@ -125,7 +151,13 @@ export default function TaskRunner({ store }: { store: ProductStore }) {
         ...(telemetry.taskId ? { taskId: telemetry.taskId } : {}),
         ...(preamble ? { preamble } : {}),
         ...(skillMaxSteps ? { maxSteps: skillMaxSteps } : {}),
-        onStep: (step) => setSteps((prev) => [...prev, step]),
+        onStep: (step) => {
+          setSteps((prev) => {
+            const next = [...prev, step];
+            onRunningChange({ stepCount: next.length, snippet: task.slice(0, 60) });
+            return next;
+          });
+        },
       });
       setResult(taskResult);
     } catch (e) {
@@ -136,6 +168,7 @@ export default function TaskRunner({ store }: { store: ProductStore }) {
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       if (telemetry.taskId) await heartbeat('idle');
       setRunning(false);
+      onRunningChange(null);
       abortRef.current = null;
     }
   }
@@ -153,26 +186,58 @@ export default function TaskRunner({ store }: { store: ProductStore }) {
         rows={3}
         disabled={running}
       />
-      <div className="row">
+
+      <div className="config-bar">
         {skills.length > 0 && (
-          <select value={skill} onChange={(e) => setSkill(e.target.value)} disabled={running} title={skills.find((s) => s.slug === skill)?.description ?? 'pick a skill'}>
-            <option value="">no skill</option>
-            {skills.map((s) => (
-              <option key={s.slug} value={s.slug}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+          <label className="config">
+            <span>skill</span>
+            <select value={skill} onChange={(e) => setSkill(e.target.value)} disabled={running} title={skills.find((s) => s.slug === skill)?.description ?? 'pick a skill'}>
+              <option value="">none</option>
+              {skills.map((s) => (
+                <option key={s.slug} value={s.slug}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
         )}
-        <button className="primary" disabled={running || !task.trim()} onClick={run}>
-          run
-        </button>
-        <button className="danger" disabled={!running} onClick={stop}>
-          stop
-        </button>
-        {running && <span className="muted">working…</span>}
-        {!running && usingProvider && <span className="muted">using {usingProvider}</span>}
+        {modelOptions.length > 0 && (
+          <label className="config">
+            <span>model</span>
+            <select value={model} onChange={(e) => setModel(e.target.value)} disabled={running} title="model for this task (overrides the provider default)">
+              <option value="">default</option>
+              {modelOptions.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {effortOptions.length > 0 && (
+          <label className="config">
+            <span>effort</span>
+            <select value={effort} onChange={(e) => setEffort(e.target.value)} disabled={running} title="reasoning effort for this task">
+              <option value="">default</option>
+              {effortOptions.map((e) => (
+                <option key={e} value={e}>
+                  {e}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <div className="run-controls">
+          <button className="primary" disabled={running || !task.trim()} onClick={run}>
+            run
+          </button>
+          <button className="danger" disabled={!running} onClick={stop}>
+            stop
+          </button>
+        </div>
       </div>
+
+      {!running && usingProvider && <div className="muted small">using {usingProvider}</div>}
 
       {error && <div className="note err">{error}</div>}
 
@@ -180,8 +245,11 @@ export default function TaskRunner({ store }: { store: ProductStore }) {
         <ol className="steps">
           {steps.map((step) => (
             <li key={step.index} className={step.ok ? 'step' : 'step failed'}>
-              <span className="step-call">{step.call}</span>
-              <span className="muted">{step.detail}</span>
+              <span className="step-idx">{step.index}</span>
+              <span className="step-body">
+                <span className="step-call">{step.call}</span>
+                <span className="muted">{step.detail}</span>
+              </span>
             </li>
           ))}
         </ol>

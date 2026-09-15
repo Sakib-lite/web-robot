@@ -10,7 +10,7 @@ export interface RemoteDeps {
   source: string;
   fetchFn: typeof fetch;
   reload: () => void;
-  runTask: (taskId: string, taskText: string, backendUrl: string, skill?: string) => Promise<void>;
+  runTask: (taskId: string, taskText: string, backendUrl: string, skill?: string, model?: string, effort?: string) => Promise<void>;
   getBackend: () => Promise<string>;
   getWorkerEnabled: () => Promise<boolean>;
   saveWorkerEnabled: (enabled: boolean) => Promise<void>;
@@ -77,7 +77,7 @@ export async function maybeRunRemoteWork(deps: RemoteDeps): Promise<string> {
     }
     await heartbeat('idle');
 
-    let queued: { taskId?: string; taskText?: string; skill?: string };
+    let queued: { taskId?: string; taskText?: string; skill?: string; model?: string; effort?: string };
     try {
       const res = await deps.fetchFn(`${backendUrl}/queue/next?src=${deps.source}`, { signal: AbortSignal.timeout(4000) });
       queued = (await res.json()) as { taskId?: string; taskText?: string };
@@ -86,7 +86,7 @@ export async function maybeRunRemoteWork(deps: RemoteDeps): Promise<string> {
     }
     if (queued?.taskId && queued.taskText) {
       await deps.showPanel().catch(() => undefined);
-      await deps.runTask(queued.taskId, queued.taskText, backendUrl, queued.skill);
+      await deps.runTask(queued.taskId, queued.taskText, backendUrl, queued.skill, queued.model, queued.effort);
       return 'started';
     }
     return `idle (queue empty)`;
@@ -108,6 +108,8 @@ async function runClaimedTask(
   backendUrl: string,
   skill: string | undefined,
   driver: ReturnType<typeof createDriver>,
+  taskModel?: string,
+  taskEffort?: string,
 ): Promise<void> {
   const active = await resolveActiveProvider(createProductStore(chromeArea()));
   if (!active) {
@@ -119,8 +121,10 @@ async function runClaimedTask(
     return;
   }
   let provider = active;
-  // a selected skill injects its body as a preamble and may override the
-  // model/effort/maxSteps defaults
+  // per-task overrides chosen at queue time win; a selected skill fills the
+  // gaps and injects its body as a preamble
+  if (taskModel) provider = { ...provider, model: taskModel };
+  if (taskEffort) provider = { ...provider, thinking: taskEffort as 'off' | 'low' | 'high' | 'max' };
   let preamble: string | undefined;
   let maxSteps: number | undefined;
   if (skill) {
@@ -128,8 +132,8 @@ async function runClaimedTask(
       const res = await fetch(`${backendUrl}/skills/${encodeURIComponent(skill)}`);
       if (res.ok) {
         const full = (await res.json()) as { name?: string; body?: string; defaults?: Record<string, string> };
-        if (full.defaults?.model) provider = { ...provider, model: full.defaults.model };
-        if (full.defaults?.effort) provider = { ...provider, thinking: full.defaults.effort as 'off' | 'low' | 'high' | 'max' };
+        if (full.defaults?.model && !taskModel) provider = { ...provider, model: full.defaults.model };
+        if (full.defaults?.effort && !taskEffort) provider = { ...provider, thinking: full.defaults.effort as 'off' | 'low' | 'high' | 'max' };
         if (full.defaults?.maxSteps) maxSteps = Number(full.defaults.maxSteps);
         if (full.body) preamble = `SKILL "${full.name ?? skill}" - follow this workflow for the whole task:\n\n${full.body}`.slice(0, 8000);
       }
@@ -168,10 +172,10 @@ function remoteDepsForDriver(makeDriver: () => ReturnType<typeof createDriver>, 
     getWorkerEnabled: () => isRemoteWorkerEnabled(chromeArea()),
     saveWorkerEnabled: (enabled) => saveRemoteWorkerEnabled(enabled, chromeArea()),
     showPanel: openExtensionPanel,
-    runTask: async (taskId, taskText, backendUrl, skill) => {
+    runTask: async (taskId, taskText, backendUrl, skill, model, effort) => {
       currentTaskId = taskId;
       try {
-        await runClaimedTask(taskId, taskText, backendUrl, skill, makeDriver());
+        await runClaimedTask(taskId, taskText, backendUrl, skill, makeDriver(), model, effort);
       } finally {
         currentTaskId = null;
       }

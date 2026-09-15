@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import SettingsView from './SettingsView';
-import TaskRunner from './TaskRunner';
+import TaskRunner, { type RunState } from './TaskRunner';
 import { useProviders } from './useProviders';
 import { maybeRunRemoteWork, panelRemoteDeps } from '@/core/remote/worker';
 import { getBackendUrl } from '@/core/telemetry/settings';
@@ -10,6 +10,7 @@ export default function App() {
   const { store, configs, refresh } = useProviders();
   const [remoteState, setRemoteState] = useState('idle');
   const [backendState, setBackendState] = useState('checking backend…');
+  const [manualRun, setManualRun] = useState<RunState | null>(null);
   const baseDeps = useRef(panelRemoteDeps());
 
   useEffect(() => {
@@ -53,10 +54,10 @@ export default function App() {
     const unwrapped = baseDeps.current;
     baseDeps.current = {
       ...unwrapped,
-      runTask: async (taskId: string, taskText: string, backendUrl: string, skill?: string) => {
+      runTask: async (taskId: string, taskText: string, backendUrl: string, skill?: string, model?: string, effort?: string) => {
         setRemoteState(`claimed queued task: ${taskText.slice(0, 50)}`);
         try {
-          await unwrapped.runTask(taskId, taskText, backendUrl, skill);
+          await unwrapped.runTask(taskId, taskText, backendUrl, skill, model, effort);
           setRemoteState(`task finished · trace ${taskId.slice(0, 8)}`);
         } catch (error) {
           setRemoteState(`claim error (stays until next claim): ${error instanceof Error ? error.message : String(error)}`);
@@ -66,10 +67,28 @@ export default function App() {
     };
   }, []);
 
+  const remoteRunning = remoteState.startsWith('claimed');
+  const running = manualRun !== null || remoteRunning;
+  const runningLabel = manualRun
+    ? `running · step ${manualRun.stepCount}`
+    : remoteRunning
+      ? 'remote task running'
+      : '';
+  const runningHint = manualRun?.snippet || remoteState;
+
   return (
     <main className="app">
       <header className="top">
-        <h1 className="brand">web-robot</h1>
+        <div className="brand-wrap">
+          <span className="logo" aria-hidden />
+          <h1 className="brand">web-robot</h1>
+          {running && (
+            <span className="running-pill" title={runningHint}>
+              <span className="spinner" aria-hidden />
+              {runningLabel}
+            </span>
+          )}
+        </div>
         <nav>
           <button className={view === 'task' ? 'tab on' : 'tab'} onClick={() => setView('task')}>
             task
@@ -77,14 +96,21 @@ export default function App() {
           <button className={view === 'settings' ? 'tab on' : 'tab'} onClick={() => setView('settings')}>
             settings
           </button>
-          <button className="tab" title="restart the extension after a rebuild" onClick={() => chrome.runtime.reload()}>
+          <button className="tab icon" title="restart the extension after a rebuild" onClick={() => chrome.runtime.reload()}>
             ⟳
           </button>
         </nav>
       </header>
-      {remoteState !== 'idle' && <div className="note ok small">{remoteState}</div>}
-      {view === 'task' ? <TaskRunner store={store} /> : <SettingsView store={store} configs={configs} refresh={refresh} />}
-      <footer className="muted small backend-state">{backendState}</footer>
+      {remoteState !== 'idle' && !remoteRunning && <div className="note ok small">{remoteState}</div>}
+      {view === 'task' ? (
+        <TaskRunner store={store} configs={configs} onRunningChange={setManualRun} />
+      ) : (
+        <SettingsView store={store} configs={configs} refresh={refresh} />
+      )}
+      <footer className="muted small backend-state">
+        <span className={backendState.startsWith('backend ok') ? 'dot ok' : 'dot err'} aria-hidden />
+        {backendState}
+      </footer>
     </main>
   );
 }

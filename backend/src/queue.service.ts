@@ -3,7 +3,7 @@ import { DbService } from './db.service';
 
 @Injectable()
 export class QueueService implements OnModuleInit {
-  private readonly queue: Array<{ taskId: string; taskText: string; skill?: string }> = [];
+  private readonly queue: Array<{ taskId: string; taskText: string; skill?: string; model?: string; effort?: string }> = [];
   private reloadRequested = false;
   private pendingWorkerControl: boolean | null = null;
   private readonly workerStatuses = new Map<
@@ -32,13 +32,13 @@ export class QueueService implements OnModuleInit {
     this.startReaper();
   }
 
-  async enqueue(taskText: string, skill?: string) {
+  async enqueue(taskText: string, skill?: string, model?: string, effort?: string) {
     const res = await this.db.pool.query(
-      `INSERT INTO tasks (task_text, skill, status) VALUES ($1, $2, 'queued') RETURNING id`,
-      [taskText, skill ?? null],
+      `INSERT INTO tasks (task_text, skill, model, effort, status) VALUES ($1, $2, $3, $4, 'queued') RETURNING id`,
+      [taskText, skill ?? null, model ?? null, effort ?? null],
     );
     const taskId = res.rows[0].id as string;
-    this.queue.push({ taskId, taskText, ...(skill ? { skill } : {}) });
+    this.queue.push({ taskId, taskText, ...(skill ? { skill } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}) });
     return { taskId };
   }
 
@@ -48,13 +48,13 @@ export class QueueService implements OnModuleInit {
   // panel auto-opens on claim - without this they ran the same task twice)
   private claimChain: Promise<unknown> = Promise.resolve();
 
-  async next(src?: string): Promise<{ taskId: string; taskText: string; skill?: string } | null> {
+  async next(src?: string): Promise<{ taskId: string; taskText: string; skill?: string; model?: string; effort?: string } | null> {
     const claim = this.claimChain.then(() => this.claimNext(src));
     this.claimChain = claim.catch(() => undefined);
     return claim;
   }
 
-  private async claimNext(src?: string): Promise<{ taskId: string; taskText: string; skill?: string } | null> {
+  private async claimNext(src?: string): Promise<{ taskId: string; taskText: string; skill?: string; model?: string; effort?: string } | null> {
     // single-flight: while any worker is mid-run (busy heartbeat or a claim
     // from moments ago), nobody else gets a task - the sw and panel poll
     // independently and must not run two tasks in parallel
@@ -70,13 +70,19 @@ export class QueueService implements OnModuleInit {
       // the row is the source of truth for text (reaper-requeued memory
       // entries carry none)
       const res = await this.db.pool.query(
-        `UPDATE tasks SET status='starting' WHERE id = $1 AND status='queued' RETURNING task_text, skill`,
+        `UPDATE tasks SET status='starting' WHERE id = $1 AND status='queued' RETURNING task_text, skill, model, effort`,
         [fromMemory.taskId],
       );
       if (res.rowCount === 0) return null; // someone else already claimed it
       const row = res.rows[0];
       this.markClaimed(src, fromMemory.taskId);
-      return { taskId: fromMemory.taskId, taskText: row.task_text, ...(row.skill ? { skill: row.skill } : {}) };
+      return {
+        taskId: fromMemory.taskId,
+        taskText: row.task_text,
+        ...(row.skill ? { skill: row.skill } : {}),
+        ...(row.model ? { model: row.model } : {}),
+        ...(row.effort ? { effort: row.effort } : {}),
+      };
     }
 
     // memory empty: atomically adopt one queued row - self-heals tasks whose
@@ -85,12 +91,18 @@ export class QueueService implements OnModuleInit {
     const res = await this.db.pool.query(
       `UPDATE tasks SET status='starting'
        WHERE id IN (SELECT id FROM tasks WHERE status='queued' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-       RETURNING id, task_text, skill`,
+       RETURNING id, task_text, skill, model, effort`,
     );
     const row = res.rows[0];
     if (!row) return null;
     this.markClaimed(src, row.id);
-    return { taskId: row.id, taskText: row.task_text, ...(row.skill ? { skill: row.skill } : {}) };
+    return {
+      taskId: row.id,
+      taskText: row.task_text,
+      ...(row.skill ? { skill: row.skill } : {}),
+      ...(row.model ? { model: row.model } : {}),
+      ...(row.effort ? { effort: row.effort } : {}),
+    };
   }
 
   // a claim is a busy marker in itself: the claimant may not heartbeat for a

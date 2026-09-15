@@ -12,9 +12,14 @@ export class QueueController {
   ) {}
 
   @Post('queue')
-  enqueue(@Body() body: { taskText: string; skill?: string }) {
+  enqueue(@Body() body: { taskText: string; skill?: string; model?: string; effort?: string }) {
     if (!body.taskText?.trim()) throw new Error('taskText is required');
-    return this.queue.enqueue(body.taskText.trim(), body.skill?.trim() || undefined);
+    return this.queue.enqueue(
+      body.taskText.trim(),
+      body.skill?.trim() || undefined,
+      body.model?.trim() || undefined,
+      body.effort?.trim() || undefined,
+    );
   }
 
   @Get('queue/next')

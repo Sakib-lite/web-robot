@@ -1,9 +1,14 @@
 :root {
   color-scheme: light dark;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --line: color-mix(in srgb, currentColor 15%, transparent);
+  --line: color-mix(in srgb, currentColor 14%, transparent);
+  --line-strong: color-mix(in srgb, currentColor 24%, transparent);
+  --soft: color-mix(in srgb, currentColor 5%, transparent);
+  --softer: color-mix(in srgb, currentColor 3%, transparent);
   --ok: #2e9e5b;
   --err: #c23e3e;
+  --accent: #3572e6;
+  --accent-soft: color-mix(in srgb, #3572e6 14%, transparent);
 }
 
 * {
@@ -20,34 +25,126 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  padding: 12px;
+  padding: 12px 12px 10px;
   gap: 10px;
 }
+
+/* ---------- header ---------- */
 
 .top {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.brand-wrap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.logo {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #7aa7ff, var(--accent) 60%, #1d4fb8);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  flex: none;
 }
 
 .brand {
   font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   margin: 0;
+  white-space: nowrap;
+}
+
+.running-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 999px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+  animation: pill-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pill-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--accent-soft);
+  }
+  50% {
+    box-shadow: 0 0 0 4px var(--accent-soft);
+  }
+}
+
+.spinner {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+  flex: none;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.top nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .tab {
   border: none;
   background: none;
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 4px 9px;
+  border-radius: 999px;
   color: inherit;
-  opacity: 0.6;
+  opacity: 0.55;
+  transition:
+    opacity 0.15s,
+    background 0.15s;
+}
+
+.tab:hover {
+  opacity: 0.85;
+  background: var(--soft);
 }
 
 .tab.on {
   opacity: 1;
-  border-bottom: 2px solid currentColor;
+  background: var(--soft);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--line);
 }
+
+.tab.icon {
+  font-size: 14px;
+  padding: 4px 7px;
+}
+
+/* ---------- shared ---------- */
 
 .muted {
   color: color-mix(in srgb, currentColor 55%, transparent);
@@ -59,12 +156,24 @@ body {
 
 button {
   font: inherit;
-  padding: 4px 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: color-mix(in srgb, currentColor 5%, transparent);
+  padding: 4px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--soft);
   color: inherit;
   cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    transform 0.05s;
+}
+
+button:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 9%, transparent);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 button:disabled {
@@ -73,9 +182,15 @@ button:disabled {
 }
 
 button.primary {
-  background: #3572e6;
-  border-color: #3572e6;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 92%, #fff), var(--accent));
+  border-color: color-mix(in srgb, var(--accent) 80%, #000);
   color: #fff;
+  font-weight: 600;
+  box-shadow: 0 1px 2px color-mix(in srgb, #000 25%, transparent);
+}
+
+button.primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 88%, #000));
 }
 
 button.danger {
@@ -90,15 +205,73 @@ button.danger {
   flex-wrap: wrap;
 }
 
+select {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--softer);
+  color: inherit;
+  cursor: pointer;
+  max-width: 150px;
+}
+
+/* ---------- task runner ---------- */
+
+.runner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .runner textarea {
   width: 100%;
   font: inherit;
-  padding: 8px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: transparent;
+  padding: 9px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--softer);
   color: inherit;
   resize: vertical;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.runner textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.config-bar {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.config {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.config > span {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: color-mix(in srgb, currentColor 50%, transparent);
+}
+
+.config select {
+  max-width: 130px;
+}
+
+.run-controls {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
 }
 
 .steps {
@@ -112,32 +285,66 @@ button.danger {
 
 .step {
   display: flex;
-  flex-direction: column;
+  gap: 8px;
+  align-items: baseline;
   padding: 6px 8px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-left: 3px solid color-mix(in srgb, var(--ok) 60%, transparent);
+  border-radius: 7px;
+  background: var(--softer);
+  animation: step-in 0.18s ease-out;
+}
+
+@keyframes step-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .step.failed {
-  border-color: color-mix(in srgb, var(--err) 45%, transparent);
+  border-left-color: color-mix(in srgb, var(--err) 65%, transparent);
+}
+
+.step-idx {
+  font-size: 10px;
+  font-weight: 700;
+  color: color-mix(in srgb, currentColor 45%, transparent);
+  min-width: 16px;
+  text-align: right;
+  flex: none;
+}
+
+.step-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .step-call {
   font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
 }
 
 .note {
   padding: 8px 10px;
-  border-radius: 6px;
-  margin-top: 8px;
+  border-radius: 8px;
+  margin-top: 4px;
 }
 
 .note.ok {
   border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent);
+  background: color-mix(in srgb, var(--ok) 7%, transparent);
 }
 
 .note.err {
   border: 1px solid color-mix(in srgb, var(--err) 45%, transparent);
+  background: color-mix(in srgb, var(--err) 7%, transparent);
 }
 
 .data {
@@ -152,6 +359,10 @@ button.danger {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--softer);
 }
 
 .result > strong {
@@ -206,8 +417,10 @@ button.danger {
 }
 
 .result-data th {
-  background: color-mix(in srgb, currentColor 5%, transparent);
+  background: var(--soft);
 }
+
+/* ---------- settings ---------- */
 
 .settings {
   display: flex;
@@ -217,15 +430,17 @@ button.danger {
 
 .product-card {
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 10px;
+  border-radius: 10px;
+  padding: 11px;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  background: var(--softer);
 }
 
 .product-card.active {
   border-color: color-mix(in srgb, var(--ok) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 8%, transparent);
 }
 
 .product-card h2 {
@@ -238,6 +453,7 @@ button.danger {
 
 .badge {
   font-size: 10px;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--ok);
@@ -251,6 +467,13 @@ button.danger {
   margin: 0 0 8px;
 }
 
+.settings section {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 11px;
+  background: var(--softer);
+}
+
 .provider-list {
   list-style: none;
   margin: 0;
@@ -262,7 +485,7 @@ button.danger {
 
 .provider {
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 8px;
   display: flex;
   flex-direction: column;
@@ -296,12 +519,18 @@ button.danger {
 .settings input {
   font: inherit;
   padding: 6px 8px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
   background: transparent;
   color: inherit;
   text-transform: none;
   letter-spacing: normal;
+}
+
+.settings input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .key-input {
@@ -320,13 +549,35 @@ button.danger {
 
 .chip {
   font-size: 11px;
-  padding: 2px 8px;
+  padding: 2px 9px;
   border-radius: 999px;
 }
+
+/* ---------- footer ---------- */
 
 .backend-state {
   margin-top: auto;
   padding-top: 8px;
   border-top: 1px solid var(--line);
   word-break: break-all;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.dot.ok {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent);
+}
+
+.dot.err {
+  background: var(--err);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--err) 18%, transparent);
 }

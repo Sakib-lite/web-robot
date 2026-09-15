@@ -14,7 +14,7 @@ function queueService(adopted: Array<{ id: string; task_text: string }> = [], in
           const row = adopted[adoptCalls++];
           return { rows: row ? [row] : [] };
         }
-        if (sql.includes(`VALUES ($1, $2, 'queued')`)) {
+        if (sql.includes(`VALUES ($1, $2, $3, $4, 'queued')`)) {
           const id = insertIds[insertCalls] ?? `id-${queries.length}`;
           texts.set(id, String(params?.[0] ?? ''));
           return { rows: [{ id }] };
@@ -37,7 +37,7 @@ describe('QueueService', () => {
     const { service, queries } = queueService();
     const res = await service.enqueue('list repos');
     expect(res.taskId).toBe('id-1');
-    expect(queries[0]![0]).toContain(`VALUES ($1, $2, 'queued')`);
+    expect(queries[0]![0]).toContain(`VALUES ($1, $2, $3, $4, 'queued')`);
     expect(service.depth()).toBe(1);
   });
 

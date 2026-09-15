@@ -46,7 +46,7 @@ describe('maybeRunRemoteWork', () => {
       '/queue/next': { taskId: 'abc', taskText: 'list repos' },
     });
     expect(await maybeRunRemoteWork(deps({ fetchFn, runTask }))).toBe('started');
-    expect(runTask).toHaveBeenCalledWith('abc', 'list repos', 'http://backend.test', undefined);
+    expect(runTask).toHaveBeenCalledWith('abc', 'list repos', 'http://backend.test', undefined, undefined, undefined);
   });
 
   it('shows the panel when a task is claimed, even if it fails', async () => {
@@ -109,7 +109,7 @@ describe('maybeRunRemoteWork', () => {
     });
     expect(await maybeRunRemoteWork(deps({ fetchFn, runTask, getWorkerEnabled: async () => enabled, saveWorkerEnabled: async (v) => { enabled = v; } }))).toBe('started');
     expect(enabled).toBe(true);
-    expect(runTask).toHaveBeenCalledWith('abc', 'run me', 'http://backend.test', undefined);
+    expect(runTask).toHaveBeenCalledWith('abc', 'run me', 'http://backend.test', undefined, undefined, undefined);
   });
 
   it('never runs two tasks concurrently', async () => {
