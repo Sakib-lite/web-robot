@@ -425,17 +425,19 @@ select {
 .settings {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
-.product-card {
+.product-card,
+.settings section {
   border: 1px solid var(--line);
   border-radius: 10px;
-  padding: 11px;
+  padding: 4px 11px 11px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   background: var(--softer);
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .product-card.active {
@@ -443,12 +445,79 @@ select {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 8%, transparent);
 }
 
-.product-card h2 {
-  font-size: 13px;
-  margin: 0 0 6px;
+.card-head {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 7px 2px;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+
+.card-head:hover:not(:disabled) {
+  background: none;
+}
+
+.card-title {
+  font-size: 13px;
+  font-weight: 650;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.card-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: color-mix(in srgb, currentColor 50%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chevron {
+  flex: none;
+  color: color-mix(in srgb, currentColor 45%, transparent);
+  transition: transform 0.18s ease;
+}
+
+.chevron.open {
+  transform: rotate(180deg);
+}
+
+/* grid-rows collapse: smooth open/close without measuring heights */
+.card-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.2s ease;
+}
+
+.card-body.open {
+  grid-template-rows: 1fr;
+}
+
+.card-body > div {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.card-body > div > .note {
+  margin-top: 4px;
+}
+
+.toggle-switch-row {
+  display: flex;
+  align-items: center;
+  padding-top: 4px;
 }
 
 .badge {
@@ -465,13 +534,6 @@ select {
 .settings h2 {
   font-size: 13px;
   margin: 0 0 8px;
-}
-
-.settings section {
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 11px;
-  background: var(--softer);
 }
 
 .provider-list {
@@ -506,7 +568,7 @@ select {
   gap: 6px;
 }
 
-.settings label {
+.settings label:not(.switch) {
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -551,6 +613,59 @@ select {
   font-size: 11px;
   padding: 2px 9px;
   border-radius: 999px;
+}
+
+/* ---------- toggle switch ---------- */
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch .track {
+  width: 32px;
+  height: 18px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 20%, transparent);
+  position: relative;
+  transition: background 0.15s;
+  flex: none;
+}
+
+.switch .track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px color-mix(in srgb, #000 35%, transparent);
+  transition: left 0.15s;
+}
+
+.switch input:checked + .track {
+  background: var(--ok);
+}
+
+.switch input:checked + .track::after {
+  left: 16px;
+}
+
+.switch input:focus-visible + .track {
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 /* ---------- footer ---------- */

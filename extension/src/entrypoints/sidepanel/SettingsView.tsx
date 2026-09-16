@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { chatCompletion } from '@/core/llm/chatClient';
 import { allProducts, type Effort, type ProductId } from '@/core/llm/products';
 import type { LlmProvider, ProductStore, StoredProductConfig } from '@/core/llm/providers';
@@ -45,6 +45,32 @@ async function runTest(provider: LlmProvider): Promise<string> {
   return call ? `tool call ok: ${call.name}(${JSON.stringify(call.args)})` : `connected, but no tool call: ${res.content.slice(0, 80)}`;
 }
 
+function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
+  return (
+    <div className={open ? 'card-body open' : 'card-body'}>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg className={open ? 'chevron open' : 'chevron'} width="12" height="12" viewBox="0 0 16 16" aria-hidden>
+      <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function Switch({ checked, onChange, label }: { checked: boolean; onChange: (next: boolean) => void; label: string }) {
+  return (
+    <label className="switch">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span className="track" aria-hidden />
+      <span>{label}</span>
+    </label>
+  );
+}
+
 export default function SettingsView({ store, configs, refresh }: { store: ProductStore; configs: StoredProductConfig[] | null; refresh: () => Promise<void> }) {
   const [cards, setCards] = useState<Record<ProductId, CardState>>(EMPTY);
   const [testState, setTestState] = useState<TestState>(null);
@@ -53,7 +79,10 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
   const [workerOn, setWorkerOn] = useState(true);
   const [wsOn, setWsOn] = useState(true);
   const [wsRoot, setWsRoot] = useState<string | null>(null);
+  const [open, setOpen] = useState<Record<ProductId, boolean>>({ glm: true, openai: false, generic: false });
+  const [secOpen, setSecOpen] = useState({ backend: true, worker: true, ws: true });
   const dirty = useRef(new Set<ProductId>());
+  const openedActive = useRef(false);
 
   useEffect(() => {
     void (async () => {
@@ -83,6 +112,14 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
       }
       return next;
     });
+    // first load: only the active product starts expanded
+    if (!openedActive.current) {
+      const active = configs.find((c) => c.active);
+      if (active) {
+        setOpen({ glm: false, openai: false, generic: false, [active.productId]: true });
+        openedActive.current = true;
+      }
+    }
   }, [configs]);
 
   function edit(productId: ProductId, patch: Partial<CardState>) {
@@ -159,154 +196,183 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
         const config = configs?.find((c) => c.productId === product.id);
         const card = cards[product.id];
         const note = testState?.productId === product.id ? testState : null;
+        const isOpen = open[product.id] ?? false;
+        const summary = config
+          ? `${config.model}${product.id === 'glm' ? ` · ${config.thinking ?? 'off'}` : ''}`
+          : 'not configured';
         return (
           <section key={product.id} className={config?.active ? 'product-card active' : 'product-card'}>
-            <h2>
-              {product.label}
-              {config?.active ? <span className="badge">active</span> : null}
-            </h2>
-            <label>
-              base url
-              <input
-                value={config?.baseUrl ?? product.defaults.baseUrl}
-                onChange={async (e) => {
-                  if (!config) return;
-                  await store.save({ ...config, baseUrl: e.target.value });
-                  await refresh();
-                }}
-              />
-            </label>
-            <label>
-              api key
-              <div className="row">
+            <button type="button" className="card-head" onClick={() => setOpen((prev) => ({ ...prev, [product.id]: !isOpen }))} aria-expanded={isOpen}>
+              <span className="card-title">
+                {product.label}
+                {config?.active ? <span className="badge">active</span> : null}
+              </span>
+              <span className="card-summary">{summary}</span>
+              <Chevron open={isOpen} />
+            </button>
+            <Collapse open={isOpen}>
+              <label>
+                base url
                 <input
-                  type="text"
-                  className="key-input"
-                  value={card.apiKey}
-                  onChange={(e) => edit(product.id, { apiKey: e.target.value })}
-                  placeholder={config?.apiKey ? 'saved' : 'paste or click ⌘v'}
-                  spellCheck={false}
-                  autoComplete="off"
-                />
-                <button onClick={() => pasteKey(product.id)}>paste</button>
-              </div>
-            </label>
-            <label>
-              model
-              <input
-                list={`${product.id}-models`}
-                value={card.model}
-                onChange={(e) => edit(product.id, { model: e.target.value })}
-                placeholder={product.defaults.model}
-              />
-              <datalist id={`${product.id}-models`}>
-                {(product.models ?? [product.defaults.model]).map((model) => (
-                  <option key={model} value={model} />
-                ))}
-              </datalist>
-            </label>
-            {product.id === 'glm' && (
-              <label>
-                effort
-                <select value={card.thinking} onChange={(e) => edit(product.id, { thinking: e.target.value as Effort })}>
-                  <option value="off">off (fastest, no reasoning)</option>
-                  <option value="low">low</option>
-                  <option value="high">high</option>
-                  <option value="max">max (deepest reasoning)</option>
-                </select>
-              </label>
-            )}
-            {product.id === 'openai' && (
-              <label>
-                reasoning effort
-                <select value={card.reasoningEffort} onChange={(e) => edit(product.id, { reasoningEffort: e.target.value as CardState['reasoningEffort'] })}>
-                  <option value="">default</option>
-                  <option value="low">low</option>
-                  <option value="medium">medium</option>
-                  <option value="high">high</option>
-                </select>
-              </label>
-            )}
-            <div className="row">
-              <button className="primary" onClick={() => save(product.id)}>
-                save
-              </button>
-              {!config?.active && (
-                <button disabled={!config} onClick={async () => { await store.activate(product.id); await refresh(); }}>
-                  activate
-                </button>
-              )}
-              <button disabled={testing} onClick={() => test(product.id)}>
-                test
-              </button>
-              {config && (
-                <button
-                  className="danger"
-                  onClick={async () => {
-                    await store.clear(product.id);
-                    setCards({ ...cards, [product.id]: EMPTY[product.id] });
+                  value={config?.baseUrl ?? product.defaults.baseUrl}
+                  onChange={async (e) => {
+                    if (!config) return;
+                    await store.save({ ...config, baseUrl: e.target.value });
                     await refresh();
                   }}
-                >
-                  clear
-                </button>
+                />
+              </label>
+              <label>
+                api key
+                <div className="row">
+                  <input
+                    type="text"
+                    className="key-input"
+                    value={card.apiKey}
+                    onChange={(e) => edit(product.id, { apiKey: e.target.value })}
+                    placeholder={config?.apiKey ? 'saved' : 'paste or click ⌘v'}
+                    spellCheck={false}
+                    autoComplete="off"
+                  />
+                  <button onClick={() => pasteKey(product.id)}>paste</button>
+                </div>
+              </label>
+              <label>
+                model
+                <input
+                  list={`${product.id}-models`}
+                  value={card.model}
+                  onChange={(e) => edit(product.id, { model: e.target.value })}
+                  placeholder={product.defaults.model}
+                />
+                <datalist id={`${product.id}-models`}>
+                  {(product.models ?? [product.defaults.model]).map((model) => (
+                    <option key={model} value={model} />
+                  ))}
+                </datalist>
+              </label>
+              {product.id === 'glm' && (
+                <label>
+                  effort
+                  <select value={card.thinking} onChange={(e) => edit(product.id, { thinking: e.target.value as Effort })}>
+                    <option value="off">off (fastest, no reasoning)</option>
+                    <option value="low">low</option>
+                    <option value="high">high</option>
+                    <option value="max">max (deepest reasoning)</option>
+                  </select>
+                </label>
               )}
-            </div>
-            {note && <div className={note.ok ? 'note ok' : 'note err'}>{note.message}</div>}
+              {product.id === 'openai' && (
+                <label>
+                  reasoning effort
+                  <select value={card.reasoningEffort} onChange={(e) => edit(product.id, { reasoningEffort: e.target.value as CardState['reasoningEffort'] })}>
+                    <option value="">default</option>
+                    <option value="low">low</option>
+                    <option value="medium">medium</option>
+                    <option value="high">high</option>
+                  </select>
+                </label>
+              )}
+              <div className="row">
+                <button className="primary" onClick={() => save(product.id)}>
+                  save
+                </button>
+                {!config?.active && (
+                  <button
+                    disabled={!config}
+                    onClick={async () => {
+                      await store.activate(product.id);
+                      setOpen((prev) => ({ ...prev, [product.id]: true }));
+                      await refresh();
+                    }}
+                  >
+                    activate
+                  </button>
+                )}
+                <button disabled={testing} onClick={() => test(product.id)}>
+                  test
+                </button>
+                {config && (
+                  <button
+                    className="danger"
+                    onClick={async () => {
+                      await store.clear(product.id);
+                      setCards({ ...cards, [product.id]: EMPTY[product.id] });
+                      await refresh();
+                    }}
+                  >
+                    clear
+                  </button>
+                )}
+              </div>
+              {note && <div className={note.ok ? 'note ok' : 'note err'}>{note.message}</div>}
+            </Collapse>
           </section>
         );
       })}
 
       <section>
-        <h2>Debug backend</h2>
-        <p className="muted small">Every run is recorded there (steps, DOM, LLM thinking). Start it with `pnpm backend`.</p>
-        <label>
-          backend url
-          <input value={backend} onChange={(e) => setBackend(e.target.value)} placeholder={DEFAULT_BACKEND_URL} />
-        </label>
-        <div className="row">
-          <button
-            className="primary"
-            onClick={async () => {
-              await saveBackendUrl(backend);
-              setTestState({ productId: 'generic', ok: true, message: `backend saved: ${await getBackendUrl()}` });
-            }}
-          >
-            save
-          </button>
-          {testState?.productId === 'generic' && <span className={testState.ok ? 'note ok' : 'note err'}>{testState.message}</span>}
-        </div>
+        <button type="button" className="card-head" onClick={() => setSecOpen((prev) => ({ ...prev, backend: !prev.backend }))} aria-expanded={secOpen.backend}>
+          <span className="card-title">Debug backend</span>
+          <span className="card-summary">telemetry + queue</span>
+          <Chevron open={secOpen.backend} />
+        </button>
+        <Collapse open={secOpen.backend}>
+          <p className="muted small">Every run is recorded there (steps, DOM, LLM thinking). Start it with `pnpm backend`.</p>
+          <label>
+            backend url
+            <input value={backend} onChange={(e) => setBackend(e.target.value)} placeholder={DEFAULT_BACKEND_URL} />
+          </label>
+          <div className="row">
+            <button
+              className="primary"
+              onClick={async () => {
+                await saveBackendUrl(backend);
+                setTestState({ productId: 'generic', ok: true, message: `backend saved: ${await getBackendUrl()}` });
+              }}
+            >
+              save
+            </button>
+            {testState?.productId === 'generic' && <span className={testState.ok ? 'note ok' : 'note err'}>{testState.message}</span>}
+          </div>
+        </Collapse>
       </section>
 
       <section>
-        <h2>Remote worker</h2>
-        <p className="muted small">
-          Lets queued tasks from the debug backend run automatically in this browser. Turn off and the agent never claims work on its own.
-        </p>
-        <label className="row">
-          <input
-            type="checkbox"
+        <button type="button" className="card-head" onClick={() => setSecOpen((prev) => ({ ...prev, worker: !prev.worker }))} aria-expanded={secOpen.worker}>
+          <span className="card-title">Remote worker</span>
+          <span className="card-summary">{workerOn ? 'auto-runs queued tasks' : 'off'}</span>
+          <Chevron open={secOpen.worker} />
+        </button>
+        <Collapse open={secOpen.worker}>
+          <p className="muted small">
+            Lets queued tasks from the debug backend run automatically in this browser. Turn off and the agent never claims work on its own.
+          </p>
+          <Switch
             checked={workerOn}
-            onChange={async (e) => {
-              setWorkerOn(e.target.checked);
-              await saveRemoteWorkerEnabled(e.target.checked);
+            label="run queued tasks automatically"
+            onChange={async (next) => {
+              setWorkerOn(next);
+              await saveRemoteWorkerEnabled(next);
             }}
           />
-          run queued tasks automatically
-        </label>
+        </Collapse>
       </section>
 
       <section>
-        <h2>Workspace tools</h2>
-        <p className="muted small">
-          Lets the agent read/write files and run commands in the local workspace{wsRoot ? ` (${wsRoot})` : ''}, jailed to that folder. Turn off and every file/exec tool is refused by the backend.
-        </p>
-        <label className="row">
-          <input
-            type="checkbox"
+        <button type="button" className="card-head" onClick={() => setSecOpen((prev) => ({ ...prev, ws: !prev.ws }))} aria-expanded={secOpen.ws}>
+          <span className="card-title">Workspace tools</span>
+          <span className="card-summary">{wsOn ? wsRoot ?? 'enabled' : 'disabled'}</span>
+          <Chevron open={secOpen.ws} />
+        </button>
+        <Collapse open={secOpen.ws}>
+          <p className="muted small">
+            Lets the agent read/write files and run commands in the local workspace{wsRoot ? ` (${wsRoot})` : ''}, jailed to that folder. Turn off and every file/exec tool is refused by the backend.
+          </p>
+          <Switch
             checked={wsOn}
-            onChange={async (e) => {
-              const next = e.target.checked;
+            label="allow file and command tools"
+            onChange={async (next) => {
               setWsOn(next);
               try {
                 const res = await fetch(`${await getBackendUrl()}/workspace/control`, {
@@ -321,8 +387,7 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
               }
             }}
           />
-          allow file and command tools
-        </label>
+        </Collapse>
       </section>
     </div>
   );
