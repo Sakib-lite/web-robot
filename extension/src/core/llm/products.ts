@@ -1,7 +1,7 @@
 import { effectiveModel } from './modelSlots';
 import type { LlmProvider } from './providers';
 
-export type ProductId = 'glm' | 'openai' | 'generic';
+export type ProductId = 'glm' | 'openai' | 'generic' | 'ollama';
 export type Effort = 'off' | 'low' | 'high' | 'max';
 
 export interface WirePayload {
@@ -26,6 +26,8 @@ export interface LlmProduct {
   defaults: { baseUrl: string; model: string };
   models?: string[];
   efforts?: Effort[];
+  // local endpoints (ollama) need no api key - settings skips the key checks
+  keyless?: boolean;
   buildPayload: (provider: LlmProvider, req: ProductBuildInput) => WirePayload;
 }
 
@@ -94,6 +96,24 @@ export const openaiProduct: LlmProduct = {
   }),
 };
 
+// ollama's /v1 OpenAI-compatible endpoint; gpt-oss honors reasoning_effort
+// (low|high) there - "off" simply omits the knob and uses the model default
+export const ollamaProduct: LlmProduct = {
+  id: 'ollama',
+  label: 'Ollama (local)',
+  defaults: { baseUrl: 'http://127.0.0.1:11434/v1', model: 'gpt-oss:20b' },
+  models: ['gpt-oss:20b', 'gpt-oss:120b'],
+  efforts: ['off', 'low', 'high'],
+  keyless: true,
+  buildPayload: (provider, req) => ({
+    model: resolveModel(provider, req.model),
+    messages: req.messages,
+    ...(req.tools?.length ? { tools: req.tools } : {}),
+    max_tokens: Math.min(req.maxTokens ?? FOREIGN_MAX_TOKENS, FOREIGN_MAX_TOKENS),
+    ...(provider.thinking && provider.thinking !== 'off' ? { reasoning_effort: provider.thinking } : {}),
+  }),
+};
+
 export const genericProduct: LlmProduct = {
   id: 'generic',
   label: 'Other (OpenAI-compatible)',
@@ -110,6 +130,7 @@ const PRODUCTS: Record<ProductId, LlmProduct> = {
   glm: glmProduct,
   openai: openaiProduct,
   generic: genericProduct,
+  ollama: ollamaProduct,
 };
 
 export function getProduct(id: ProductId): LlmProduct {

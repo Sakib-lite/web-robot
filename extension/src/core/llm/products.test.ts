@@ -8,7 +8,7 @@ function provider(over: Partial<LlmProvider> = {}): LlmProvider {
 
 describe('product registry', () => {
   it('has one strategy per product id', () => {
-    expect(allProducts().map((p) => p.id)).toEqual(['glm', 'openai', 'generic']);
+    expect(allProducts().map((p) => p.id)).toEqual(['glm', 'openai', 'generic', 'ollama']);
     expect(getProduct('openai').label).toBe('OpenAI');
   });
 });

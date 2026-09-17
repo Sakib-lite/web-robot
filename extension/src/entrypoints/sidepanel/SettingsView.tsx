@@ -17,6 +17,7 @@ const EMPTY: Record<ProductId, CardState> = {
   glm: { apiKey: '', model: '', thinking: 'off', reasoningEffort: '' },
   openai: { apiKey: '', model: '', thinking: 'off', reasoningEffort: '' },
   generic: { apiKey: '', model: '', thinking: 'off', reasoningEffort: '' },
+  ollama: { apiKey: '', model: '', thinking: 'off', reasoningEffort: '' },
 };
 
 function cardFor(productId: ProductId, config: StoredProductConfig | undefined): CardState {
@@ -79,7 +80,7 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
   const [workerOn, setWorkerOn] = useState(true);
   const [wsOn, setWsOn] = useState(true);
   const [wsRoot, setWsRoot] = useState<string | null>(null);
-  const [open, setOpen] = useState<Record<ProductId, boolean>>({ glm: true, openai: false, generic: false });
+  const [open, setOpen] = useState<Record<ProductId, boolean>>({ glm: true, openai: false, generic: false, ollama: false });
   const [secOpen, setSecOpen] = useState({ backend: true, worker: true, ws: true });
   const dirty = useRef(new Set<ProductId>());
   const openedActive = useRef(false);
@@ -116,7 +117,7 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
     if (!openedActive.current) {
       const active = configs.find((c) => c.active);
       if (active) {
-        setOpen({ glm: false, openai: false, generic: false, [active.productId]: true });
+        setOpen({ glm: false, openai: false, generic: false, ollama: false, [active.productId]: true });
         openedActive.current = true;
       }
     }
@@ -151,7 +152,7 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
         baseUrl: existing?.baseUrl ?? product.defaults.baseUrl,
         apiKey: card.apiKey,
         model: card.model || product.defaults.model,
-        ...(productId === 'glm' ? { thinking: card.thinking } : {}),
+        ...(product.efforts ? { thinking: card.thinking } : {}),
         ...(productId === 'openai' && card.reasoningEffort ? { reasoningEffort: card.reasoningEffort } : {}),
       });
       setTestState({ productId, ok: true, message: 'saved' });
@@ -167,7 +168,7 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
     const card = cards[productId];
     const existing = configs?.find((c) => c.productId === productId);
     const apiKey = card.apiKey || existing?.apiKey || '';
-    if (!apiKey) {
+    if (!apiKey && !product.keyless) {
       setTestState({ productId, ok: false, message: 'paste an api key first' });
       return;
     }
@@ -179,7 +180,7 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
         baseUrl: existing?.baseUrl ?? product.defaults.baseUrl,
         apiKey,
         model: card.model || existing?.model || product.defaults.model,
-        ...(productId === 'glm' ? { thinking: card.thinking } : {}),
+        ...(product.efforts ? { thinking: card.thinking } : {}),
         ...(productId === 'openai' && card.reasoningEffort ? { reasoningEffort: card.reasoningEffort } : {}),
       };
       setTestState({ productId, ok: true, message: await runTest(provider) });
@@ -222,21 +223,25 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
                   }}
                 />
               </label>
-              <label>
-                api key
-                <div className="row">
-                  <input
-                    type="text"
-                    className="key-input"
-                    value={card.apiKey}
-                    onChange={(e) => edit(product.id, { apiKey: e.target.value })}
-                    placeholder={config?.apiKey ? 'saved' : 'paste or click ⌘v'}
-                    spellCheck={false}
-                    autoComplete="off"
-                  />
-                  <button onClick={() => pasteKey(product.id)}>paste</button>
-                </div>
-              </label>
+              {product.keyless ? (
+                <p className="muted small">local server - no api key needed</p>
+              ) : (
+                <label>
+                  api key
+                  <div className="row">
+                    <input
+                      type="text"
+                      className="key-input"
+                      value={card.apiKey}
+                      onChange={(e) => edit(product.id, { apiKey: e.target.value })}
+                      placeholder={config?.apiKey ? 'saved' : 'paste or click ⌘v'}
+                      spellCheck={false}
+                      autoComplete="off"
+                    />
+                    <button onClick={() => pasteKey(product.id)}>paste</button>
+                  </div>
+                </label>
+              )}
               <label>
                 model
                 <input
@@ -251,14 +256,15 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
                   ))}
                 </datalist>
               </label>
-              {product.id === 'glm' && (
+              {product.efforts && (
                 <label>
                   effort
                   <select value={card.thinking} onChange={(e) => edit(product.id, { thinking: e.target.value as Effort })}>
-                    <option value="off">off (fastest, no reasoning)</option>
-                    <option value="low">low</option>
-                    <option value="high">high</option>
-                    <option value="max">max (deepest reasoning)</option>
+                    {product.efforts.map((level) => (
+                      <option key={level} value={level}>
+                        {level === 'off' ? 'off (fastest, no reasoning)' : level === 'max' ? 'max (deepest reasoning)' : level}
+                      </option>
+                    ))}
                   </select>
                 </label>
               )}
