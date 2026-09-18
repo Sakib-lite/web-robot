@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Logger, NotFoundException, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Logger, NotFoundException, Param, Post, Query } from '@nestjs/common';
 import { QueueService } from './queue.service';
 import { DbService } from './db.service';
 
@@ -32,7 +32,7 @@ export class QueueController {
   }
 
   @Post('tasks/:id/retry')
-  async retry(id: string) {
+  async retry(@Param('id') id: string) {
     const res = await this.queue.retry(id);
     if (!res.queued) throw new NotFoundException(`task ${id} not found or not in failed/stopped state`);
     this.logger.log(`RETRY queued: ${id}`);
@@ -51,7 +51,7 @@ export class QueueController {
 
   @Post('tasks/:id/start')
   async start(
-    id: string,
+    @Param('id') id: string,
     @Body() body: { product?: string; model?: string; effort?: string },
   ) {
     await this.db.pool.query(
