@@ -30,8 +30,19 @@ async function runOne(taskText, label, overrides = {}) {
   const { taskId } = await post('/queue', { taskText, ...overrides });
   const started = Date.now();
   let status = 'queued';
+  let fetchFailures = 0;
   while (status === 'queued' || status === 'starting' || status === 'running') {
-    ({ status } = await get(`/tasks/wait?id=${taskId}&timeoutMs=600000`));
+    try {
+      ({ status } = await get(`/tasks/wait?id=${taskId}&timeoutMs=600000`));
+      fetchFailures = 0;
+    } catch (error) {
+      // a single tcp blip on the long-poll must not kill the whole batch -
+      // the task keeps running server-side regardless
+      fetchFailures++;
+      if (fetchFailures > 5) throw error;
+      console.error(`[web-robot] wait blip (${error instanceof Error ? error.message : String(error)}) - retrying`);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
   }
 
   const report = await get(`/tasks/${taskId}/debug`);

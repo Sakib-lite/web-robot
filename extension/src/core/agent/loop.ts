@@ -54,6 +54,45 @@ const DANGER_PATTERN = /pay|purchase|order|buy|checkout|delete|remove|submit|pos
 
 const MAX_LOCAL_CONTEXT = 12000;
 const TAB_BUDGET = 6;
+const EXEC_TOTAL_SOFT = 40;
+const FILE_OPS_NUDGE = 20;
+const FILE_OPS_BLOCK = 35;
+
+// guards the exec spiral: one big file sliced across dozens of grep/sed
+// turns. counts total execs and per-file mentions (file tools and filenames
+// inside shell commands); nudges early, blocks hard.
+function execSpiralGuard(
+  call: LocalCall,
+  execCount: { total: number },
+  fileOps: Map<string, number>,
+  notes: string[],
+): 'ok' | 'blocked' {
+  const targets = new Set<string>();
+  if ('path' in call && typeof call.path === 'string') targets.add(call.path);
+  if (call.op === 'exec') {
+    execCount.total++;
+    for (const token of call.cmd.match(/[\w./-]+\.(?:txt|html?|md|json|csv|tsv|xml)\b/gi) ?? []) targets.add(token.toLowerCase());
+  }
+  for (const target of targets) {
+    const seen = (fileOps.get(target) ?? 0) + 1;
+    fileOps.set(target, seen);
+    if (seen === FILE_OPS_NUDGE) {
+      notes.push(
+        `You have now run ${seen} commands against "${target}". Slicing a big file through exec burns a step per slice and earlier outputs are dropped from context. Instead: write ONE python script that parses "${target}" fully and writes the final structured output to a new file, then read_file that result once.`,
+      );
+    }
+    if (seen >= FILE_OPS_BLOCK && call.op === 'exec') {
+      notes.push(`"${target}" is fenced off: further exec touching it is blocked. Transform it with one script or use read_file.`);
+      return 'blocked';
+    }
+  }
+  if (execCount.total === EXEC_TOTAL_SOFT) {
+    notes.push(
+      `You have used ${execCount.total} exec calls. Each is a full agent step - consolidate all remaining parsing/transformation into as few scripts as possible and produce the deliverable now.`,
+    );
+  }
+  return 'ok';
+}
 
 function agentNoteDetail(text: string): string {
   return text.length > 90 ? `${text.slice(0, 87)}… (saved to PLAN.md)` : `${text} (saved to PLAN.md)`;
@@ -247,6 +286,13 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   // only the latest read/list/exec output stays in context, bounded - older
   // ones live on in the step log as one-liners
   let latestLocal: { label: string; text: string } | null = null;
+  // spiral guards for local tools: the classic failure is 100+ grep/sed
+  // slices of one big file, each a full agent turn that forgot the last
+  const execCount = { total: 0 };
+  const fileOps = new Map<string, number>();
+  // rolling memory of recent exec results so the model never re-runs a
+  // command whose output it already saw (exec amnesia)
+  let execDigests: string[] = [];
   // milestone plan + its PLAN.md mirror: written by loop code, not model turns
   let plan: Array<{ text: string; done: boolean }> | null = null;
   const planFindings: string[] = [];
@@ -415,7 +461,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt(deps.workspace?.root) },
       ...(deps.preamble ? [{ role: 'system' as const, content: deps.preamble }] : []),
-      { role: 'user', content: taskContext(task, stepLines, userAnswers, extracts, agentNotes, latestLocal, plan) },
+      { role: 'user', content: taskContext(task, stepLines, userAnswers, extracts, agentNotes, latestLocal, plan, execDigests) },
       ...notes.map((content) => ({ role: 'system' as const, content })),
       { role: 'user', content: observationBlock(tabs, snapshot, Object.fromEntries(ownedTabs)) },
     ];
@@ -462,7 +508,15 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       const empty = !res.content.trim();
       noToolStrikes++;
       if (noToolStrikes >= 3) {
-        return { status: 'failed', reason: `model stopped calling tools${empty ? ' (empty replies)' : ''}: ${res.content.slice(0, 200)}`, steps };
+        const reason = `model stopped calling tools${empty ? ' (empty replies)' : ''}: ${res.content.slice(0, 200)}`;
+        const verdict = await reinvestigate(reason);
+        if ('resume' in verdict) {
+          noToolStrikes = 0;
+          maxSteps += 25;
+          notes.push(`The model went silent, but re-investigation decided to continue. RESUME INSTRUCTION: ${verdict.resume}`);
+          continue;
+        }
+        return { status: 'failed', reason, steps };
       }
       notes.push(
         empty
@@ -529,7 +583,17 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
         index++;
         continue;
       }
+      const guard = execSpiralGuard(agentCall.call, execCount, fileOps, notes);
+      if (guard === 'blocked') {
+        record(false, describeLocal(agentCall.call), 'blocked: exec spiral guard - too many commands against the same target');
+        index++;
+        continue;
+      }
       const outcome = await runLocal(agentCall.call, deps.workspace.plane, readLedger);
+      if (outcome.ok && agentCall.call.op === 'exec' && outcome.text) {
+        const digest = outcome.text.replace(/\s+/g, ' ').slice(0, 90);
+        execDigests = [...execDigests.slice(-9), `${agentCall.call.cmd.replace(/\s+/g, ' ').slice(0, 50)} -> ${digest}`];
+      }
       if (outcome.text !== null && outcome.text !== undefined) {
         latestLocal = { label: outcome.label ?? '', text: outcome.text.length > MAX_LOCAL_CONTEXT ? outcome.text.slice(0, MAX_LOCAL_CONTEXT) + '…' : outcome.text };
       }

@@ -23,6 +23,7 @@ export function systemPrompt(workspaceRoot?: string): string {
       '14. For research/collection tasks: create the deliverable early (write_file with a header), append_file each verified batch, and read_file the tail afterwards to verify formatting. Put deliverables in a "<topic>-<date>/" folder.',
       '15. exec is jailed to the workspace; a few catastrophic commands are blocked. For big listings pipe through head/tail/grep. Prefer it for counting, transforming, or bulk work you cannot do efficiently with the other tools.',
       '16. At the start of any multi-step task call update_plan with 3-6 concrete milestones, and check items off (done: true) as you complete them - the plan survives interruptions, so a resumed run skips finished work. If a workflow proved useful, save it as a reusable skill by writing skills/<slug>/SKILL.md (frontmatter keys: name, description, optionally model/effort/maxSteps). Tabs you open are marked (agent) and closed automatically when the task ends.',
+      '17. exec economy: every exec is a full agent step and only its capped output is kept. Parse a big downloaded page with ONE python script that writes the final structured result to a file - never grep/sed your way through a file across many calls. Check "RECENT EXEC RESULTS" before running anything: never re-run a command whose output you already have. Keep scratch/intermediate files inside a scratch folder for the task, never loose in the workspace root; only the deliverable goes in "<topic>-<date>/".',
     );
   }
   return rules.join('\n');
@@ -47,6 +48,7 @@ export function taskContext(
   notes: string[] = [],
   latestLocal: { label: string; text: string } | null = null,
   plan: Array<{ text: string; done: boolean }> | null = null,
+  execDigests: string[] = [],
 ): string {
   const parts = [`TASK:\n${task}`];
   if (plan && plan.length > 0) {
@@ -63,6 +65,9 @@ export function taskContext(
   }
   if (userAnswers.length > 0) parts.push(`USER ANSWERS:\n${userAnswers.join('\n')}`);
   if (latestLocal) parts.push(`LATEST LOCAL RESULT (${latestLocal.label}):\n${latestLocal.text}`);
+  if (execDigests.length > 0) {
+    parts.push(`RECENT EXEC RESULTS (latest last - do NOT re-run a command whose result you already have):\n${execDigests.map((d) => `- ${d}`).join('\n')}`);
+  }
   if (extracts.length > 0) {
     const older = extracts.slice(0, -1).slice(-MAX_EXTRACTS_KEPT + 1);
     const latest = extracts[extracts.length - 1]!;

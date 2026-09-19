@@ -79,12 +79,13 @@ describe('runTask', () => {
     expect(result).toMatchObject({ status: 'failed', reason: 'login wall' });
   });
 
-  it('nudges twice on non-tool replies, fails on the third, and names empty replies', async () => {
+  it('nudges twice on non-tool replies, re-investigates the third, and names empty replies', async () => {
     const chat = vi.fn().mockResolvedValue(reply('I will just explain...'));
     const result = await runTask('do the thing', deps({ chat }));
     expect(result.status).toBe('failed');
     expect(result.reason).toContain('model stopped calling tools');
-    expect(chat).toHaveBeenCalledTimes(3);
+    // 3 no-tool turns + 1 re-investigation verdict (which also returns no tool)
+    expect(chat).toHaveBeenCalledTimes(4);
 
     const empty = vi.fn().mockResolvedValue(reply(''));
     const emptyResult = await runTask('do the thing', deps({ chat: empty }));
@@ -685,5 +686,45 @@ describe('P4: tab ownership', () => {
       .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'x' })]));
     await runTask('t', deps({ driver, chat, cleanupTabs: false }));
     expect(closed).toEqual([]);
+  });
+});
+
+describe('exec spiral guard + rolling exec memory', () => {
+  function wsDepsLocal(over: Partial<LoopDeps> & { plane?: import('../local/plane').LocalPlane } = {}): LoopDeps {
+    const { plane, ...rest } = over;
+    return deps({ ...rest, workspace: { plane: plane ?? fakePlane(), root: '/tmp/robots' } });
+  }
+
+  it('nudges at 20 ops on one file and blocks exec touching it at 35', async () => {
+    const plane = fakePlane();
+    const chat = vi.fn(async (_messages: import('../llm/chatClient').ChatMessage[], _tools: unknown[]) => {
+      const n = chat.mock.calls.length;
+      if (n <= 35) return reply('', [toolCall('exec', { cmd: `sed -n '1,${n}p' page1.txt` })]);
+      return reply('', [toolCall('done', { summary: 'stopped slicing' })]);
+    });
+    const result = await runTask('parse the file', wsDepsLocal({ chat, plane }));
+
+    expect(result.status).toBe('done');
+    const blocked = result.steps.filter((s) => !s.ok && s.detail.includes('spiral guard'));
+    expect(blocked.length).toBeGreaterThanOrEqual(1);
+    const contexts = chat.mock.calls.map((c) => (c[0] as import('../llm/chatClient').ChatMessage[]).map((m) => m.content ?? '').join('\n'));
+    expect(contexts.some((c) => c.includes('write ONE python script'))).toBe(true);
+    expect(contexts.some((c) => c.includes('RECENT EXEC RESULTS'))).toBe(true);
+  });
+
+  it('keeps only the last 10 exec digests in context', async () => {
+    const plane = fakePlane();
+    const chat = vi.fn(async (_messages: import('../llm/chatClient').ChatMessage[], _tools: unknown[]) => {
+      const n = chat.mock.calls.length;
+      if (n <= 12) return reply('', [toolCall('exec', { cmd: `echo result-${n}` })]);
+      return reply('', [toolCall('done', { summary: 'x' })]);
+    });
+    await runTask('t', wsDepsLocal({ chat, plane }));
+    const last = (chat.mock.calls[12]![0] as import('../llm/chatClient').ChatMessage[]).map((m) => m.content ?? '').join('\n');
+    const block = last.slice(last.lastIndexOf('RECENT EXEC RESULTS'));
+    expect(block).toContain('result-12 ->');
+    expect(block).toContain('result-3 ->');
+    expect(block).not.toContain('result-2 ->');
+    expect(block).not.toContain('result-1 ->');
   });
 });
