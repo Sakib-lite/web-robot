@@ -7,7 +7,7 @@ export interface TimelineEntry {
 
 export interface DebugReport {
   task: {
-    id: string;
+    id: number;
     taskText: string;
     status: string;
     summary: string | null;
@@ -24,7 +24,7 @@ export interface DebugReport {
 }
 
 interface TaskRow {
-  id: string;
+  id: number;
   task_text: string;
   status: string;
   summary: string | null;

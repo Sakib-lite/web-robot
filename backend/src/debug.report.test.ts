@@ -5,7 +5,7 @@ function trace(over: Partial<TaskTrace> = {}): TaskTrace {
   const createdAt = new Date('2026-11-14T08:00:00Z');
   return {
     task: {
-      id: '11111111-1111-4111-8111-111111111111',
+      id: 1,
       task_text: 'list repos',
       status: 'failed',
       summary: null,
@@ -29,7 +29,7 @@ describe('buildDebugReport', () => {
   it('shapes the task summary with camelCase fields', () => {
     const report = buildDebugReport(trace());
     expect(report.task).toMatchObject({
-      id: '11111111-1111-4111-8111-111111111111',
+      id: 1,
       taskText: 'list repos',
       status: 'failed',
       reason: 'loop detected',
