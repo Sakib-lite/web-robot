@@ -26,8 +26,14 @@ async function get(path) {
   return res.json();
 }
 
+const flagsWithValues = new Set(['--repeat', '--file', '--model', '--effort', '--skill', '--context', '--continue', '--step']);
+
 async function runOne(taskText, label, overrides = {}) {
   const { taskId } = await post('/queue', { taskText, ...overrides });
+  return waitAndReport(taskId, label);
+}
+
+async function waitAndReport(taskId, label) {
   const started = Date.now();
   let status = 'queued';
   let fetchFailures = 0;
@@ -76,6 +82,22 @@ async function main() {
     return;
   }
 
+  const args = process.argv.slice(2);
+  const continueIndex = args.indexOf('--continue');
+  if (continueIndex >= 0) {
+    const id = Number(args[continueIndex + 1]);
+    const positional = args.filter((arg, i) => !arg.startsWith('--') && !(i > 0 && flagsWithValues.has(args[i - 1])));
+    const message = positional[0];
+    if (!id || !message) {
+      console.error('usage: node scripts/run-task.mjs --continue <taskId> "message"');
+      process.exit(1);
+    }
+    await post(`/tasks/${id}/continue`, { message });
+    console.log(`[web-robot] continuation queued for task ${id} - waiting for it to finish`);
+    await waitAndReport(id, `continue #${id}`);
+    return;
+  }
+
   const worker = await get('/worker/status');
   const alive = Object.entries(worker.sources ?? {}).filter(([, s]) => s.state !== 'off' && s.ageMs < 120000);
   if (alive.length === 0) {
@@ -85,21 +107,21 @@ async function main() {
   }
   console.log(`[web-robot] worker alive: ${alive.map(([src, s]) => `${src} (${s.state})`).join(', ')}`);
 
-  const args = process.argv.slice(2);
   const repeatIndex = args.indexOf('--repeat');
   const repeat = repeatIndex >= 0 ? Math.max(1, Number(args[repeatIndex + 1] ?? 1)) : 1;
   const fileIndex = args.indexOf('--file');
 
-  const flagsWithValues = new Set(['--repeat', '--file', '--model', '--effort', '--skill']);
   const flagValue = (name) => {
     const i = args.indexOf(name);
     return i >= 0 ? args[i + 1] : undefined;
   };
   const overrides = {};
-  for (const flag of ['model', 'effort', 'skill']) {
+  for (const flag of ['model', 'effort', 'skill', 'context']) {
     const value = flagValue(`--${flag}`);
     if (value) overrides[flag] = value;
   }
+  const stepValues = args.filter((arg, i) => i > 0 && args[i - 1] === '--step' && arg && !arg.startsWith('--'));
+  if (stepValues.length) overrides.steps = stepValues;
   let taskTexts;
   if (fileIndex >= 0) {
     taskTexts = readFileSync(args[fileIndex + 1], 'utf8')
@@ -110,7 +132,7 @@ async function main() {
     const positional = args.filter((arg, i) => !arg.startsWith('--') && !(i > 0 && flagsWithValues.has(args[i - 1])));
     const taskText = positional[0];
     if (!taskText) {
-      console.error('usage: node scripts/run-task.mjs "task" | --repeat N "task" | --file tasks.txt | --model glm-5.3 --effort low --skill <slug> | --reload | --worker on|off | --ws on|off');
+      console.error('usage: node scripts/run-task.mjs "task" | --repeat N "task" | --file tasks.txt | --model glm-5.3 --effort low --skill <slug> | --context <slug> | --step "..." (repeatable) | --continue <taskId> "message" | --reload | --worker on|off | --ws on|off');
       process.exit(1);
     }
     taskTexts = Array.from({ length: repeat }, () => taskText);
