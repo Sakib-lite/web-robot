@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, symlink, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, symlink, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -112,6 +112,16 @@ describe('exec', () => {
     expect(res.output).toContain(root);
   });
 
+  it('runs inside a per-task cwd, creating it, and still rejects escapes', async () => {
+    const res = await service.exec('pwd > where.txt && pwd', undefined, 'tasks/42');
+    // pwd prints the physical path, so compare against the resolved temp dir
+    const expected = await realpath(join(root, 'tasks/42'));
+    expect(res.output.trim()).toBe(expected);
+    expect((await readFile(join(root, 'tasks/42/where.txt'), 'utf8')).trim()).toBe(expected);
+    await expectCode(service.exec('pwd', undefined, '../outside'), 'ESCAPE');
+    await expectCode(service.exec('pwd', undefined, '/tmp'), 'ESCAPE');
+  });
+
   it('does not source the user shell profile', async () => {
     await writeFile(join(root, '.profile'), 'export PROFILE_LEAK=1\n');
     const res = await service.exec('echo "leak=[$PROFILE_LEAK]"');
@@ -183,5 +193,33 @@ describe('skills', () => {
     const before = (await service.listSkills()).length;
     expect(before).toBeGreaterThanOrEqual(0);
     await expectCode(service.getSkill('ghost-skill'), 'NOT_FOUND');
+  });
+});
+
+describe('contexts', () => {
+  it('lists flat .md files, follows symlinks, and serves bodies on demand', async () => {
+    await mkdir(join(root, 'contexts'), { recursive: true });
+    await writeFile(join(root, 'contexts', 'profile-professional.md'), '# professional\n- senior swe, backend + ai\n');
+    // symlinked context: the file lives elsewhere (kept in sync by its owner)
+    await writeFile(join(root, 'source-education.md'), '# education\n- bsc cse, cgpa 3.9\n');
+    await symlink('../source-education.md', join(root, 'contexts', 'profile-education.md'));
+    // non-markdown and directories are ignored
+    await writeFile(join(root, 'contexts', 'notes.txt'), 'not a context');
+    await mkdir(join(root, 'contexts', 'draft.md'));
+
+    const listed = await service.listContexts();
+    expect(listed.map((c) => c.slug)).toEqual(['profile-education', 'profile-professional']);
+    expect(listed[0]!.bytes).toBeGreaterThan(0);
+
+    const body = await service.getContext('profile-professional');
+    expect(body.body).toContain('senior swe');
+    expect((await service.getContext('profile-education')).body).toContain('cgpa 3.9');
+  });
+
+  it('rejects missing contexts and bad slugs', async () => {
+    // shared root: other tests may have created contexts - only assert absence
+    expect((await service.listContexts()).find((c) => c.slug === 'ghost-context')).toBeUndefined();
+    await expectCode(service.getContext('ghost-context'), 'NOT_FOUND');
+    await expectCode(service.getContext('../evil'), 'INVALID');
   });
 });

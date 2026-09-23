@@ -53,6 +53,20 @@ export class WorkspaceController {
     }
   }
 
+  @Get('contexts')
+  async contexts() {
+    return { contexts: await this.workspace.listContexts() };
+  }
+
+  @Get('contexts/:slug')
+  async context(@Param('slug') slug: string) {
+    try {
+      return await this.workspace.getContext(slug);
+    } catch (error) {
+      workspaceFailure(error);
+    }
+  }
+
   @Post('fs/list')
   async list(@Body() body: { path?: string }) {
     return this.guarded(() => this.workspace.list(body.path ?? '.'));
@@ -89,8 +103,8 @@ export class WorkspaceController {
   }
 
   @Post('exec')
-  async exec(@Body() body: { cmd: string; timeoutMs?: number }) {
-    return this.guarded(() => this.workspace.exec(body.cmd, body.timeoutMs));
+  async exec(@Body() body: { cmd: string; timeoutMs?: number; cwd?: string }) {
+    return this.guarded(() => this.workspace.exec(body.cmd, body.timeoutMs, body.cwd));
   }
 
   private async guarded<T>(run: () => Promise<T>): Promise<T> {

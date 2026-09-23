@@ -154,6 +154,42 @@ export class WorkspaceService implements OnModuleInit {
     };
   }
 
+  // shared background profiles: flat .md files (symlinks welcome - e.g. to
+  // files maintained elsewhere) inside contexts/, attached to a task from the
+  // panel dropdown or --context so "find jobs for this profile" works
+  async listContexts(): Promise<Array<{ slug: string; bytes: number }>> {
+    const contextsDir = join(this.root, 'contexts');
+    let names: string[];
+    try {
+      names = await fs.readdir(contextsDir);
+    } catch {
+      return []; // no contexts yet
+    }
+    const contexts: Array<{ slug: string; bytes: number }> = [];
+    for (const name of names.sort()) {
+      if (!name.endsWith('.md')) continue;
+      try {
+        const stat = await fs.stat(join(contextsDir, name)); // follows symlinks
+        if (!stat.isFile()) continue;
+        contexts.push({ slug: name.replace(/\.md$/, ''), bytes: stat.size });
+      } catch {
+        // broken symlink - skip
+      }
+    }
+    return contexts;
+  }
+
+  async getContext(slug: string): Promise<{ slug: string; name: string; body: string }> {
+    if (!/^[a-z0-9][a-z0-9-]*$/i.test(slug)) throw new WorkspaceError('INVALID', 'bad context slug');
+    let raw: string;
+    try {
+      raw = await fs.readFile(join(this.root, 'contexts', `${slug}.md`), 'utf8');
+    } catch {
+      throw new WorkspaceError('NOT_FOUND', `context "${slug}" does not exist`);
+    }
+    return { slug, name: slug, body: raw.trim() };
+  }
+
   isEnabled(): boolean {
     return this.enabled;
   }
@@ -349,7 +385,7 @@ export class WorkspaceService implements OnModuleInit {
     return { path: rel };
   }
 
-  async exec(cmd: string, timeoutMs = EXEC_DEFAULT_TIMEOUT_MS): Promise<ExecResult> {
+  async exec(cmd: string, timeoutMs = EXEC_DEFAULT_TIMEOUT_MS, cwd?: string): Promise<ExecResult> {
     if (!cmd?.trim()) throw new WorkspaceError('INVALID', 'cmd must not be empty');
     for (const [pattern, what] of DENY_PATTERNS) {
       if (pattern.test(cmd)) throw new WorkspaceError('DENIED', `blocked ${what} - commands are jailed to the workspace`);
@@ -358,10 +394,20 @@ export class WorkspaceService implements OnModuleInit {
     const timeout = Math.min(Math.max(1000, Math.floor(timeoutMs)), EXEC_MAX_TIMEOUT_MS);
     const started = Date.now();
 
+    // optional per-task cwd (relative to the workspace root): a task's
+    // relative-path output files land inside its own folder
+    let runDir = this.root;
+    if (cwd) {
+      const target = this.assertInside(cwd);
+      await this.assertNoSymlinkEscape(target, cwd);
+      await fs.mkdir(target, { recursive: true });
+      runDir = target;
+    }
+
     return await new Promise<ExecResult>((resolve) => {
       // --noprofile --norc: a workspace command must never source the user's
       // shell profile
-      const child = spawn('bash', ['--noprofile', '--norc', '-c', cmd], { cwd: this.root });
+      const child = spawn('bash', ['--noprofile', '--norc', '-c', cmd], { cwd: runDir });
       let timedOut = false;
       // bounded head+tail capture: unlimited output must never grow memory,
       // and the cap must keep the end (exit errors, last lines) not just the start
