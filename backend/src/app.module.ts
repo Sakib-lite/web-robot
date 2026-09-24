@@ -6,9 +6,11 @@ import { QueueService } from './queue.service';
 import { QueueController } from './queue.controller';
 import { WorkspaceService } from './workspace.service';
 import { WorkspaceController } from './workspace.controller';
+import { ProvidersService } from './providers.service';
+import { ProvidersController } from './providers.controller';
 
 @Module({
-  controllers: [TasksController, QueueController, WorkspaceController],
-  providers: [DbService, TasksService, QueueService, WorkspaceService],
+  controllers: [TasksController, QueueController, WorkspaceController, ProvidersController],
+  providers: [DbService, TasksService, QueueService, WorkspaceService, ProvidersService],
 })
 export class AppModule {}
