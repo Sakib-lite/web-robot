@@ -38,7 +38,7 @@ export function createHttpPlane(getBackendUrl: () => Promise<string>): LocalPlan
     append: async (path, text) => (await call('/fs/append', { path, text })) as never,
     delete: async (path) => (await call('/fs/delete', { path })) as never,
     mkdir: async (path) => (await call('/fs/mkdir', { path })) as never,
-    exec: async (cmd, timeoutMs): Promise<ExecResult> =>
-      (await call('/exec', { cmd, ...(timeoutMs ? { timeoutMs } : {}) }, (timeoutMs ?? 120_000) + 15_000)) as never,
+    exec: async (cmd, timeoutMs, cwd): Promise<ExecResult> =>
+      (await call('/exec', { cmd, ...(timeoutMs ? { timeoutMs } : {}), ...(cwd ? { cwd } : {}) }, (timeoutMs ?? 120_000) + 15_000)) as never,
   };
 }

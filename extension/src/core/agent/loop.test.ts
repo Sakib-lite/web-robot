@@ -555,7 +555,7 @@ describe('workspace tools', () => {
 });
 
 describe('P2: plan + re-investigation + resume', () => {
-  function wsDeps(over: Partial<LoopDeps> & { plane?: import('../local/plane').LocalPlane } = {}, taskId?: string): LoopDeps {
+  function wsDeps(over: Partial<LoopDeps> & { plane?: import('../local/plane').LocalPlane } = {}, taskId?: number): LoopDeps {
     const { plane, ...rest } = over;
     return deps({ ...rest, taskId, workspace: { plane: plane ?? fakePlane(), root: '/tmp/robots' } });
   }
@@ -566,11 +566,11 @@ describe('P2: plan + re-investigation + resume', () => {
       .fn()
       .mockResolvedValueOnce(reply('', [toolCall('update_plan', { items: [{ text: 'find rankings' }, { text: 'collect 10 unis', done: false }] })]))
       .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'x' })]));
-    const result = await runTask('list unis', wsDeps({ chat, plane }, 'task-1'));
+    const result = await runTask('list unis', wsDeps({ chat, plane }, 1));
 
     expect(result.status).toBe('done');
     expect(result.steps[0]!.detail).toContain('0/2 milestones');
-    const plan = plane.files.get('.web-robot/tasks/task-1/PLAN.md') ?? '';
+    const plan = plane.files.get('.web-robot/tasks/1/PLAN.md') ?? '';
     expect(plan).toContain('- [ ] find rankings');
     const context = (chat.mock.calls[1]![0] as import('../llm/chatClient').ChatMessage[]).map((m) => m.content ?? '').join('\n');
     expect(context).toContain('MILESTONE PLAN');
@@ -583,22 +583,68 @@ describe('P2: plan + re-investigation + resume', () => {
       .fn()
       .mockResolvedValueOnce(reply('', [toolCall('note', { text: 'MIT: faculty at mit.edu/cs' })]))
       .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'x' })]));
-    await runTask('research', wsDeps({ chat, plane }, 'task-2'));
-    const plan = plane.files.get('.web-robot/tasks/task-2/PLAN.md') ?? '';
+    await runTask('research', wsDeps({ chat, plane }, 2));
+    const plan = plane.files.get('.web-robot/tasks/2/PLAN.md') ?? '';
     expect(plan).toContain('## Findings');
     expect(plan).toContain('- MIT: faculty at mit.edu/cs');
+  });
+
+  it('every task file lands in its task folder; skills stay shared and echoed paths roundtrip', async () => {
+    const plane = fakePlane();
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('write_file', { path: 'notes.md', content: 'x' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('write_file', { path: 'skills/my-skill/SKILL.md', content: 'y' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('append_file', { path: '.web-robot/tasks/5/notes.md', text: 'z' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'ok' })]));
+    const result = await runTask('write files', wsDeps({ chat, plane }, 5));
+    expect(result.status).toBe('done');
+    expect(plane.files.has('notes.md')).toBe(false);
+    expect(plane.files.get('.web-robot/tasks/5/notes.md')).toBe('xz');
+    expect(plane.files.has('skills/my-skill/SKILL.md')).toBe(true);
+    // the resolved location is echoed so the model uses real paths from turn one
+    expect(result.steps[0]!.detail).toContain('created .web-robot/tasks/5/notes.md');
+  });
+
+  it('done summary lists touched files with absolute paths, PLAN.md excluded', async () => {
+    const plane = fakePlane();
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('update_plan', { items: [{ text: 'm1', done: false }] })]))
+      .mockResolvedValueOnce(reply('', [toolCall('write_file', { path: 'report.md', content: '# t' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'saved the report' })]));
+    const result = await runTask('save a file', wsDeps({ chat, plane }, 9));
+    expect(result.summary).toContain('saved the report');
+    expect(result.summary).toContain('**Files:**');
+    expect(result.summary).toContain('`/tmp/robots/.web-robot/tasks/9/report.md`');
+    expect(result.summary).not.toContain('PLAN.md');
+    // no files touched → no Files section
+    const plain = await runTask('nothing saved', wsDeps({ chat: vi.fn().mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'done' })])), plane: fakePlane() }, 10));
+    expect(plain.summary).not.toContain('**Files:**');
+  });
+
+  it('user steps seed the milestone plan before the first turn', async () => {
+    const plane = fakePlane();
+    const chat = vi.fn().mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'ok' })]));
+    await runTask('two-step job', wsDeps({ chat, plane, steps: ['check all posts', 'write ielts md'] }, 6));
+    const context = (chat.mock.calls[0]![0] as import('../llm/chatClient').ChatMessage[]).map((m) => m.content ?? '').join('\n');
+    expect(context).toContain('USER STEPS for this task');
+    expect(context).toContain('1. check all posts');
+    expect(context).toContain('MILESTONE PLAN');
+    expect(context).toContain('- [ ] STEP 1: check all posts');
+    expect(plane.files.get('.web-robot/tasks/6/PLAN.md') ?? '').toContain('STEP 2: write ielts md');
   });
 
   it('a prior PLAN.md resumes the run with milestones and findings preloaded', async () => {
     const plane = fakePlane();
     plane.files.set(
-      '.web-robot/tasks/task-3/PLAN.md',
+      '.web-robot/tasks/3/PLAN.md',
       '# list unis\n\n## Milestones\n- [x] find rankings\n- [ ] collect 10 unis\n\n## Findings\n- MIT: faculty at mit.edu/cs\n',
     );
     const chat = vi
       .fn()
       .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'continued' })]));
-    await runTask('list unis', wsDeps({ chat, plane }, 'task-3'));
+    await runTask('list unis', wsDeps({ chat, plane }, 3));
 
     const context = (chat.mock.calls[0]![0] as import('../llm/chatClient').ChatMessage[]).map((m) => m.content ?? '').join('\n');
     expect(context).toContain('RESUMED');

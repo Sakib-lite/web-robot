@@ -47,5 +47,5 @@ export interface LocalPlane {
   append(path: string, text: string): Promise<{ bytes: number; totalBytes: number }>;
   delete(path: string): Promise<{ path: string }>;
   mkdir(path: string): Promise<{ path: string }>;
-  exec(cmd: string, timeoutMs?: number): Promise<ExecResult>;
+  exec(cmd: string, timeoutMs?: number, cwd?: string): Promise<ExecResult>;
 }

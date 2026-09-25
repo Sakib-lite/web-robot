@@ -111,3 +111,51 @@ describe('buildSnapshot', () => {
     expect(snap.text).not.toContain('notifications');
   });
 });
+
+describe('truncation + thin-main fallback (the phd.com lesson)', () => {
+  it('marks elements as truncated when more than the cap exist', () => {
+    withBody(Array.from({ length: 90 }, (_, i) => `<a href="/x${i}">link ${i}</a>`).join(''));
+    const snap = buildSnapshot(document);
+    expect(snap.elements).toHaveLength(80);
+    expect(snap.elementsTruncated).toBe(true);
+  });
+
+  it('does not mark truncation when under the cap', () => {
+    withBody('<a href="/a">a</a><button>b</button>');
+    const snap = buildSnapshot(document);
+    expect(snap.elementsTruncated).toBeFalsy();
+  });
+
+  it('marks text as truncated when the page text exceeds the cap', () => {
+    withBody(`<main><p>${'word '.repeat(2000)}</p></main>`);
+    const snap = buildSnapshot(document);
+    expect(snap.text.length).toBeLessThanOrEqual(4000);
+    expect(snap.textTruncated).toBe(true);
+  });
+
+  it('falls back to body text when <main> is a near-empty shell (SPA detail pane)', () => {
+    withBody(`
+      <main>Select a position on the left</main>
+      <aside>
+        <div role="button">Fully Funded PhD Program 2027 - ISTA</div>
+        <div role="button">PhD Positions Fall 2027 - Columbia University</div>
+        <span>36 new · 288 applied</span>
+      </aside>
+    `);
+    const snap = buildSnapshot(document);
+    // the list content and the count badge must be visible to the agent
+    expect(snap.text).toContain('ISTA');
+    expect(snap.text).toContain('36 new');
+  });
+
+  it('keeps main content when it is substantial (no noisy body fallback)', () => {
+    withBody(`
+      <header>notifications avatar settings</header>
+      <main>${'<p>substantial article content. </p>'.repeat(20)}</main>
+      <footer>footer noise</footer>
+    `);
+    const snap = buildSnapshot(document);
+    expect(snap.text).toContain('article content');
+    expect(snap.text).not.toContain('footer noise');
+  });
+});

@@ -31,6 +31,15 @@ export function collectInteractive(root: ParentNode): Element[] {
   return visible.slice(0, MAX_ELEMENTS);
 }
 
+export function countInteractive(root: ParentNode): number {
+  const nodes = Array.from(root.querySelectorAll(INTERACTIVE_SELECTOR));
+  return nodes.filter((el) => {
+    if (el instanceof HTMLInputElement && el.type === 'hidden') return false;
+    if (el.getAttribute('aria-hidden') === 'true') return false;
+    return el.getClientRects().length > 0;
+  }).length;
+}
+
 function labelFor(el: Element): string {
   const control = el as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
   const id = el.getAttribute('id');
@@ -117,14 +126,26 @@ export function describeElement(el: Element, index: number): ElementInfo {
 }
 
 export function buildSnapshot(doc: Document): Snapshot {
+  const total = countInteractive(doc);
   const elements = collectInteractive(doc).map((el, index) => describeElement(el, index));
-  const root = doc.querySelector('main, [role="main"], article') ?? doc.body;
-  const rawText = (root as HTMLElement | null)?.innerText ?? root?.textContent ?? '';
+  // main-content text first, but an SPA's <main> can be a near-empty shell
+  // (a detail-pane placeholder) while the real content lives elsewhere -
+  // when the body is several times richer, take the whole body instead
+  const mainRoot = doc.querySelector('main, [role="main"], article') as HTMLElement | null;
+  let rawText = mainRoot?.innerText ?? '';
+  if (doc.body) {
+    const mainLen = rawText.trim().length;
+    const bodyText = doc.body.innerText ?? '';
+    if (bodyText.trim().length > mainLen * 3) rawText = bodyText;
+  }
+  const text = rawText.replace(/[ \t]+\n/g, '\n').replace(/\n{2,}/g, '\n').trim();
   return {
     url: doc.defaultView?.location.href ?? '',
     title: doc.title ?? '',
-    text: rawText.replace(/[ \t]+\n/g, '\n').replace(/\n{2,}/g, '\n').trim().slice(0, MAX_TEXT),
+    text: text.slice(0, MAX_TEXT),
+    textTruncated: text.length > MAX_TEXT,
     elements,
+    elementsTruncated: total > MAX_ELEMENTS,
   };
 }
 
