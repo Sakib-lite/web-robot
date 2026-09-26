@@ -43,10 +43,20 @@ describe('maybeRunRemoteWork', () => {
     const runTask = vi.fn(async () => {});
     const fetchFn = jsonResponder({
       '/control/reload': { reload: false },
-      '/queue/next': { taskId: 'abc', taskText: 'list repos' },
+      '/queue/next': { taskId: 7, taskText: 'list repos' },
     });
     expect(await maybeRunRemoteWork(deps({ fetchFn, runTask }))).toBe('started');
-    expect(runTask).toHaveBeenCalledWith('abc', 'list repos', 'http://backend.test', undefined, undefined, undefined);
+    expect(runTask).toHaveBeenCalledWith(expect.objectContaining({ taskId: 7, taskText: 'list repos' }), 'http://backend.test');
+  });
+
+  it('passes an attached context slug through to the runner', async () => {
+    const runTask = vi.fn(async () => {});
+    const fetchFn = jsonResponder({
+      '/control/reload': { reload: false },
+      '/queue/next': { taskId: 7, taskText: 'find jobs for this profile', context: 'profile-context-professional' },
+    });
+    expect(await maybeRunRemoteWork(deps({ fetchFn, runTask }))).toBe('started');
+    expect(runTask).toHaveBeenCalledWith(expect.objectContaining({ taskId: 7, taskText: 'find jobs for this profile', context: 'profile-context-professional' }), 'http://backend.test');
   });
 
   it('shows the panel when a task is claimed, even if it fails', async () => {
@@ -54,7 +64,7 @@ describe('maybeRunRemoteWork', () => {
     const showPanel = vi.fn(async () => { throw new Error('gesture required'); });
     const fetchFn = jsonResponder({
       '/control/reload': { reload: false },
-      '/queue/next': { taskId: 'abc', taskText: 'list repos' },
+      '/queue/next': { taskId: 7, taskText: 'list repos' },
     });
     expect(await maybeRunRemoteWork(deps({ fetchFn, runTask, showPanel }))).toBe('started');
     expect(showPanel).toHaveBeenCalledOnce();
@@ -76,7 +86,7 @@ describe('maybeRunRemoteWork', () => {
     const posts: string[] = [];
     const fetchFn = jsonResponder({
       '/control/reload': { reload: false },
-      '/queue/next': { taskId: 'abc', taskText: 'should not run' },
+      '/queue/next': { taskId: 7, taskText: 'should not run' },
     });
     const wrapped = (async (url: string | URL | Request, init?: RequestInit) => {
       if (init?.method === 'POST' && String(url).includes('/worker/status')) posts.push(String(init.body));
@@ -93,7 +103,7 @@ describe('maybeRunRemoteWork', () => {
     let enabled = true;
     const fetchFn = jsonResponder({
       '/control/reload': { reload: false, workerEnabled: false },
-      '/queue/next': { taskId: 'abc', taskText: 'should not run' },
+      '/queue/next': { taskId: 7, taskText: 'should not run' },
     });
     expect(await maybeRunRemoteWork(deps({ fetchFn, runTask, getWorkerEnabled: async () => enabled, saveWorkerEnabled: async (v) => { enabled = v; } }))).toBe('off (disabled in settings)');
     expect(enabled).toBe(false);
@@ -105,11 +115,11 @@ describe('maybeRunRemoteWork', () => {
     let enabled = false;
     const fetchFn = jsonResponder({
       '/control/reload': { reload: false, workerEnabled: true },
-      '/queue/next': { taskId: 'abc', taskText: 'run me' },
+      '/queue/next': { taskId: 7, taskText: 'run me' },
     });
     expect(await maybeRunRemoteWork(deps({ fetchFn, runTask, getWorkerEnabled: async () => enabled, saveWorkerEnabled: async (v) => { enabled = v; } }))).toBe('started');
     expect(enabled).toBe(true);
-    expect(runTask).toHaveBeenCalledWith('abc', 'run me', 'http://backend.test', undefined, undefined, undefined);
+    expect(runTask).toHaveBeenCalledWith(expect.objectContaining({ taskId: 7, taskText: 'run me' }), 'http://backend.test');
   });
 
   it('never runs two tasks concurrently', async () => {
@@ -119,7 +129,7 @@ describe('maybeRunRemoteWork', () => {
     });
     const fetchFn = jsonResponder({
       '/control/reload': { reload: false },
-      '/queue/next': { taskId: 'abc', taskText: 'slow task' },
+      '/queue/next': { taskId: 7, taskText: 'slow task' },
     });
     const runTask = vi.fn(async () => {
       await gate;

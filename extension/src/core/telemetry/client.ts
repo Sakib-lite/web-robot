@@ -10,7 +10,7 @@ export interface TelemetryEvent {
 }
 
 export interface TaskTelemetry {
-  taskId: string | null;
+  taskId: number | null;
   observe(step: number, data: Record<string, unknown>): Promise<void>;
   llm(step: number, data: Record<string, unknown>): Promise<void>;
   action(step: number, data: Record<string, unknown>): Promise<void>;
@@ -36,11 +36,11 @@ async function post(url: string, body: unknown): Promise<Response> {
 
 // telemetry must never break a run: every call swallows its errors
 export async function startTelemetry(meta: TaskMeta, backendUrl: string): Promise<TaskTelemetry> {
-  let taskId: string | null = null;
+  let taskId: number | null = null;
   try {
     const res = await post(`${backendUrl}/tasks`, meta);
     if (res.ok) {
-      const body = (await res.json()) as { id?: string };
+      const body = (await res.json()) as { id?: number };
       taskId = body.id ?? null;
     }
   } catch {
@@ -52,9 +52,36 @@ export async function startTelemetry(meta: TaskMeta, backendUrl: string): Promis
 
 const REMOTE_ANSWER = '(remote run: no user available - proceed autonomously, but never take irreversible actions like paying, submitting orders, deleting, or posting)';
 
-// remote runs have no panel: answer ask_user with guidance instead of blocking
+// a remote run has no prompt() to block on: park the question in the backend
+// (the panel polls for pending questions and prompts the user), wait up to
+// ASK_WAIT_MS for the answer, then fall back to the autonomous default
+const ASK_WAIT_MS = 120_000;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function makeRemoteAsk(taskId: number, backendUrl: string): (question: string) => Promise<string> {
+  return async (question: string) => {
+    try {
+      const res = await post(`${backendUrl}/tasks/${taskId}/ask`, { step: 0, question });
+      const { id } = (await res.json()) as { id: number };
+      const deadline = Date.now() + ASK_WAIT_MS;
+      while (Date.now() < deadline) {
+        await sleep(3000);
+        const check = await fetch(`${backendUrl}/asks/${id}`, { signal: AbortSignal.timeout(4000) });
+        if (!check.ok) break;
+        const { answer } = (await check.json()) as { answer: string | null };
+        if (answer !== null && answer !== undefined) return answer;
+      }
+    } catch {
+      // unreachable backend - proceed autonomously
+    }
+    return REMOTE_ANSWER;
+  };
+}
+
+// remote runs have no panel: ask_user parks the question in the backend and
+// waits briefly for the user's answer before proceeding autonomously
 export async function runRemoteTask(
-  taskId: string,
+  taskId: number,
   taskText: string,
   backendUrl: string,
   deps: {
@@ -64,6 +91,7 @@ export async function runRemoteTask(
     maxSteps?: number;
     workspace?: { plane: import('../local/plane').LocalPlane; root: string };
     preamble?: string;
+    steps?: string[];
   },
 ): Promise<void> {
   const telemetry = attachTelemetry(taskId, backendUrl);
@@ -83,11 +111,12 @@ export async function runRemoteTask(
       driver: deps.driver,
       chat: (messages, tools) =>
         chatCompletion(deps.provider, { messages, tools, maxTokens: 8192, ...(deps.signal ? { signal: deps.signal } : {}) }),
-      askUser: async () => REMOTE_ANSWER,
+      askUser: makeRemoteAsk(taskId, backendUrl),
       ...(deps.maxSteps ? { maxSteps: deps.maxSteps } : {}),
       ...(deps.signal ? { signal: deps.signal } : {}),
       ...(deps.workspace ? { workspace: deps.workspace } : {}),
       ...(deps.preamble ? { preamble: deps.preamble } : {}),
+      ...(deps.steps?.length ? { steps: deps.steps } : {}),
       taskId,
       telemetry,
     });
@@ -101,7 +130,7 @@ export async function runRemoteTask(
   await telemetry.finish(result.status, result.summary, result.reason, result.steps.length);
 }
 
-export function attachTelemetry(taskId: string, backendUrl: string): TaskTelemetry {
+export function attachTelemetry(taskId: number, backendUrl: string): TaskTelemetry {
   const send = async (event: TelemetryEvent) => {
     try {
       await post(`${backendUrl}/tasks/${taskId}/events`, event);

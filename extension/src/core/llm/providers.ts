@@ -115,8 +115,60 @@ export async function seedFromEnv(store: ProductStore, envSeed: LlmProvider | nu
   await store.save(envSeed);
 }
 
-export async function resolveActiveProvider(store: ProductStore, envSeed: LlmProvider | null = ENV_SEED): Promise<LlmProvider | null> {
+export async function resolveActiveProvider(
+  store: ProductStore,
+  envSeed: LlmProvider | null = ENV_SEED,
+  backend?: { url: string; fetchFn?: typeof fetch },
+): Promise<LlmProvider | null> {
   await seedFromEnv(store, envSeed);
+  if (backend) {
+    const remote = await fetchActiveProviderFromBackend(backend.url, backend.fetchFn).catch(() => null);
+    if (remote) {
+      // the db is canonical - chrome.storage stays as a warm offline cache
+      // for runs when the backend is down
+      void store
+        .save(remote)
+        .then(() => store.activate(remote.productId))
+        .catch(() => undefined);
+      return remote;
+    }
+  }
   const configs = await store.list();
   return configs.find((c) => c.active) ?? null;
+}
+
+// maps the backend's llm_providers row (web_robot db) onto a runtime provider
+export async function fetchActiveProviderFromBackend(backendUrl: string, fetchFn: typeof fetch = fetch): Promise<LlmProvider | null> {
+  const res = await fetchFn(`${backendUrl}/providers/active`, { signal: AbortSignal.timeout(3000) });
+  if (!res.ok) return null;
+  const row = (await res.json()) as { product?: string; apiKey?: string | null; baseUrl?: string | null; model?: string | null; effort?: string | null };
+  if (!row.product || !row.baseUrl || !row.model) return null;
+  const effort = normalizeEffort(row.effort ?? undefined);
+  return {
+    productId: row.product as ProductId,
+    baseUrl: row.baseUrl,
+    apiKey: row.apiKey ?? '',
+    model: row.model,
+    ...(effort ? { thinking: effort } : {}),
+  };
+}
+
+// settings write-through: the db is the canonical store, chrome.storage the cache
+export async function syncConfigToBackend(
+  backendUrl: string,
+  input: ProductConfigInput & { activate?: boolean },
+  fetchFn: typeof fetch = fetch,
+): Promise<void> {
+  const { activate, ...config } = input;
+  const res = await fetchFn(`${backendUrl}/providers/${config.productId}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ apiKey: config.apiKey, baseUrl: config.baseUrl, model: config.model, effort: config.thinking }),
+    signal: AbortSignal.timeout(3000),
+  });
+  if (!res.ok) throw new Error(`provider sync failed: HTTP ${res.status}`);
+  if (activate) {
+    const res2 = await fetchFn(`${backendUrl}/providers/${config.productId}/activate`, { method: 'POST', signal: AbortSignal.timeout(3000) });
+    if (!res2.ok) throw new Error(`provider activate failed: HTTP ${res2.status}`);
+  }
 }
