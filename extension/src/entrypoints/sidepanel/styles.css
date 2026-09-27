@@ -696,3 +696,40 @@ select {
   background: var(--err);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--err) 18%, transparent);
 }
+
+/* multi-step editor + task chat bar */
+.steps-editor { display: flex; flex-direction: column; gap: 0.4rem; }
+.step-row { display: flex; align-items: center; gap: 0.45rem; }
+.step-n {
+  flex: none; width: 1.3rem; height: 1.3rem; border-radius: 999px;
+  display: grid; place-items: center; font-size: 0.7rem; font-weight: 700;
+  background: color-mix(in oklab, currentColor 12%, transparent);
+}
+.step-row input { flex: 1; }
+.steps-editor .ghost {
+  align-self: flex-start; font-size: 0.78rem; opacity: 0.75;
+  background: none; border: 1px dashed color-mix(in oklab, currentColor 30%, transparent);
+  border-radius: 0.5rem; padding: 0.25rem 0.6rem; cursor: pointer;
+}
+.chat-bar {
+  display: flex; flex-direction: column; gap: 0.4rem;
+  border: 1px solid color-mix(in oklab, currentColor 15%, transparent);
+  border-radius: 0.75rem; padding: 0.6rem 0.7rem;
+}
+.chat-bar .row { display: flex; gap: 0.45rem; }
+.chat-bar select { max-width: 11rem; }
+.chat-bar input { flex: 1; }
+
+/* sticky header: stays pinned while the panel scrolls */
+.top {
+  position: sticky;
+  top: -12px;
+  z-index: 20;
+  margin: -12px -12px 0;
+  padding: 12px 12px 8px;
+  background: light-dark(#ffffff, #1b1b1f);
+}
+
+/* collapsible task-input + chat sections share the settings accordion look */
+.runner .card-head { margin-bottom: 0.5rem; }
+.chat-section { margin-top: 0.3rem; }

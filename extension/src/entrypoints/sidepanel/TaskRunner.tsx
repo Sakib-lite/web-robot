@@ -6,6 +6,7 @@ import { chatCompletion, type ChatMessage, type ChatResponse, type ToolDef } fro
 import { resolveActiveProvider, type ProductStore, type StoredProductConfig } from '@/core/llm/providers';
 import { getProduct, type Effort } from '@/core/llm/products';
 import { getBackendUrl } from '@/core/telemetry/settings';
+import { Chevron, Collapse } from './SettingsView';
 import { startTelemetry } from '@/core/telemetry/client';
 import ResultView from './ResultView';
 
@@ -32,6 +33,16 @@ export default function TaskRunner({
   const [task, setTask] = useState('');
   const [skills, setSkills] = useState<SkillOption[]>([]);
   const [skill, setSkill] = useState('');
+  const [contexts, setContexts] = useState<Array<{ slug: string; bytes: number }>>([]);
+  const [context, setContext] = useState('');
+  const [stepsMode, setStepsMode] = useState(false);
+  const [taskSteps, setTaskSteps] = useState<string[]>([]);
+  const [chatTaskId, setChatTaskId] = useState<number | ''>('');
+  const [chatInput, setChatInput] = useState('');
+  const [chatState, setChatState] = useState<string | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [inputOpen, setInputOpen] = useState(true);
+  const [recentTasks, setRecentTasks] = useState<Array<{ id: number; taskText: string; status: string }>>([]);
   const [model, setModel] = useState('');
   const [effort, setEffort] = useState('');
   const [running, setRunning] = useState(false);
@@ -39,7 +50,7 @@ export default function TaskRunner({
   const [result, setResult] = useState<TaskResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [usingProvider, setUsingProvider] = useState<string | null>(null);
-  const [traceInfo, setTraceInfo] = useState<{ taskId: string; backendUrl: string } | null>(null);
+  const [traceInfo, setTraceInfo] = useState<{ taskId: number; backendUrl: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const activeProduct = useMemo(() => {
@@ -52,12 +63,22 @@ export default function TaskRunner({
   useEffect(() => {
     void (async () => {
       try {
-        const res = await fetch(`${await getBackendUrl()}/skills`);
-        if (!res.ok) return;
-        const body = (await res.json()) as { skills?: SkillOption[] };
-        setSkills(body.skills ?? []);
+        const base = await getBackendUrl();
+        const [skillsRes, contextsRes, tasksRes] = await Promise.all([
+          fetch(`${base}/skills`),
+          fetch(`${base}/contexts`),
+          fetch(`${base}/tasks?limit=12`),
+        ]);
+        if (skillsRes.ok) setSkills(((await skillsRes.json()) as { skills?: SkillOption[] }).skills ?? []);
+        if (contextsRes.ok) setContexts(((await contextsRes.json()) as { contexts?: Array<{ slug: string; bytes: number }> }).contexts ?? []);
+        if (tasksRes.ok) {
+          const body = (await tasksRes.json()) as Array<{ id: number; taskText: string; status: string }>;
+          setRecentTasks(Array.isArray(body) ? body : []);
+          const finished = Array.isArray(body) ? body.find((t) => t.status !== 'queued' && t.status !== 'running') : undefined;
+          if (finished) setChatTaskId(finished.id);
+        }
       } catch {
-        // backend down - dropdown just stays empty
+        // backend down - dropdowns just stay empty
       }
     })();
   }, []);
@@ -68,7 +89,12 @@ export default function TaskRunner({
     setSteps([]);
     setTraceInfo(null);
 
-    const provider = await resolveActiveProvider(store);
+    const askUser = async (question: string) => window.prompt(`web-robot asks:\n${question}`);
+
+    const backendUrl = await getBackendUrl();
+
+    // db (backend) is the canonical provider store; falls back to chrome.storage when unreachable
+    const provider = await resolveActiveProvider(store, undefined, { url: backendUrl });
     if (!provider) {
       setError('no active llm provider - add one in settings first');
       return;
@@ -78,10 +104,6 @@ export default function TaskRunner({
     onRunningChange({ stepCount: 0, snippet: task.slice(0, 60) });
     const controller = new AbortController();
     abortRef.current = controller;
-
-    const askUser = async (question: string) => window.prompt(`web-robot asks:\n${question}`);
-
-    const backendUrl = await getBackendUrl();
 
     // per-task model/effort picked in the config bar win; a selected skill
     // fills only what was not chosen explicitly
@@ -125,6 +147,22 @@ export default function TaskRunner({
         // missing skill runs without the preamble
       }
     }
+    // an attached context (a shared profile etc.) rides along as facts for
+    // the whole task - same injection as the queue-worker path
+    if (context) {
+      try {
+        const res = await fetch(`${backendUrl}/contexts/${encodeURIComponent(context)}`);
+        if (res.ok) {
+          const full = (await res.json()) as { name?: string; body?: string };
+          if (full.body) {
+            const contextPreamble = `USER CONTEXT "${full.name ?? context}" - this task is about the user described below; apply these facts when searching, filtering, and writing:\n\n${full.body}`.slice(0, 8000);
+            preamble = preamble ? `${preamble}\n\n---\n\n${contextPreamble}` : contextPreamble;
+          }
+        }
+      } catch {
+        // missing context runs without the preamble
+      }
+    }
     const skillChat = (messages: ChatMessage[], tools: ToolDef[]): Promise<ChatResponse> =>
       chatCompletion(runProvider, { messages, tools, maxTokens: 8192, signal: controller.signal });
 
@@ -149,6 +187,7 @@ export default function TaskRunner({
         telemetry,
         ...(workspace ? { workspace } : {}),
         ...(telemetry.taskId ? { taskId: telemetry.taskId } : {}),
+        ...(effectiveSteps.length ? { steps: effectiveSteps } : {}),
         ...(preamble ? { preamble } : {}),
         ...(skillMaxSteps ? { maxSteps: skillMaxSteps } : {}),
         onStep: (step) => {
@@ -170,6 +209,19 @@ export default function TaskRunner({
       setRunning(false);
       onRunningChange(null);
       abortRef.current = null;
+      // the finished task becomes the chat target; recent list refreshes
+      if (telemetry.taskId) setChatTaskId(telemetry.taskId);
+      void (async () => {
+        try {
+          const res = await fetch(`${backendUrl}/tasks?limit=12`);
+          if (res.ok) {
+            const body = (await res.json()) as Array<{ id: number; taskText: string; status: string }>;
+            if (Array.isArray(body)) setRecentTasks(body);
+          }
+        } catch {
+          // best-effort
+        }
+      })();
     }
   }
 
@@ -177,17 +229,92 @@ export default function TaskRunner({
     abortRef.current?.abort();
   }
 
+  const effectiveSteps = stepsMode ? taskSteps.map((s) => s.trim()).filter(Boolean) : [];
+
+  function setStepAt(i: number, value: string) {
+    setTaskSteps((prev) => prev.map((s, j) => (j === i ? value : s)));
+  }
+  function removeStep(i: number) {
+    setTaskSteps((prev) => prev.filter((_, j) => j !== i));
+  }
+
+  async function sendChat() {
+    if (!chatTaskId || !chatInput.trim()) return;
+    setChatState('queueing…');
+    try {
+      const res = await fetch(`${await getBackendUrl()}/tasks/${chatTaskId}/continue`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: chatInput.trim() }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setChatInput('');
+      setChatState(`queued task #${chatTaskId} - it runs and finishes on its own`);
+    } catch (e) {
+      setChatState(`failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function killSelected() {
+    if (!chatTaskId) return;
+    if (!window.confirm(`kill task #${chatTaskId}? this reloads the extension and stops any in-flight run`)) return;
+    setChatState(`killing task #${chatTaskId}…`);
+    try {
+      const res = await fetch(`${await getBackendUrl()}/tasks/${chatTaskId}/kill`, { method: 'POST' });
+      const body = (await res.json()) as { stopped: boolean };
+      setChatState(body.stopped ? `task #${chatTaskId} killed - reload requested` : `task #${chatTaskId} was not queued/running`);
+    } catch (e) {
+      setChatState(`failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   return (
     <div className="runner">
-      <textarea
-        value={task}
-        onChange={(e) => setTask(e.target.value)}
-        placeholder="e.g. open hackernews.com, go to the first story and summarize it"
-        rows={3}
-        disabled={running}
-      />
+      <button type="button" className="card-head" onClick={() => setInputOpen((v) => !v)} aria-expanded={inputOpen}>
+        <span className="card-title">new task</span>
+        <span className="card-summary">{running ? 'running…' : task.trim() ? task.trim().slice(0, 60) : stepsMode ? 'multi-step' : 'describe a task'}</span>
+        <Chevron open={inputOpen} />
+      </button>
+      <Collapse open={inputOpen}>
+        <textarea
+          value={task}
+          onChange={(e) => setTask(e.target.value)}
+          placeholder="e.g. open hackernews.com, go to the first story and summarize it"
+          rows={3}
+          disabled={running}
+        />
+
+        {stepsMode && (
+          <div className="steps-editor">
+            {taskSteps.map((s, i) => (
+              <div key={i} className="step-row">
+                <span className="step-n">{i + 1}</span>
+                <input
+                  value={s}
+                  onChange={(e) => setStepAt(i, e.target.value)}
+                  placeholder={`step ${i + 1} - e.g. ${i === 0 ? 'check all posts, list every uni in unis.md' : i === 1 ? 'write ielts-requirements.md per uni' : 'verify both files'}`}
+                  disabled={running}
+                />
+                <button className="icon-btn" onClick={() => removeStep(i)} disabled={running || taskSteps.length === 1} title="remove step">
+                  ×
+                </button>
+              </div>
+            ))}
+            <button className="ghost" onClick={() => setTaskSteps((prev) => [...prev, ''])} disabled={running}>
+              + add step
+            </button>
+          </div>
+        )}
+      </Collapse>
 
       <div className="config-bar">
+        <label className="config" title="split the task into ordered steps the agent executes as its milestone plan - it decides HOW to do each">
+          <span>steps</span>
+          <select value={stepsMode ? 'steps' : ''} onChange={(e) => { setStepsMode(e.target.value === 'steps'); if (!taskSteps.length) setTaskSteps(['']); }} disabled={running}>
+            <option value="">single</option>
+            <option value="steps">multi-step</option>
+          </select>
+        </label>
         {skills.length > 0 && (
           <label className="config">
             <span>skill</span>
@@ -196,6 +323,19 @@ export default function TaskRunner({
               {skills.map((s) => (
                 <option key={s.slug} value={s.slug}>
                   {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {contexts.length > 0 && (
+          <label className="config">
+            <span>context</span>
+            <select value={context} onChange={(e) => setContext(e.target.value)} disabled={running} title="attach a saved profile as background facts for this task">
+              <option value="">none</option>
+              {contexts.map((c) => (
+                <option key={c.slug} value={c.slug}>
+                  {c.slug} · {(c.bytes / 1024).toFixed(1)}k
                 </option>
               ))}
             </select>
@@ -257,10 +397,50 @@ export default function TaskRunner({
 
       {traceInfo && (
         <div className="muted small">
-          trace: {traceInfo.taskId.slice(0, 8)}… —{' '}
+          trace: #{traceInfo.taskId} —{' '}
           <a href={`${traceInfo.backendUrl}/tasks/${traceInfo.taskId}/debug`} target="_blank" rel="noreferrer">
             open debug json
           </a>
+        </div>
+      )}
+
+      {recentTasks.length > 0 && (
+        <div className="chat-section">
+          <button type="button" className="card-head" onClick={() => setChatOpen((v) => !v)} aria-expanded={chatOpen}>
+            <span className="card-title">chat / continue a task</span>
+            <span className="card-summary">{chatTaskId ? `#${chatTaskId} selected` : `${recentTasks.length} recent`}</span>
+            <Chevron open={chatOpen} />
+          </button>
+          <Collapse open={chatOpen}>
+            <div className="chat-bar">
+              <div className="row">
+                <select value={chatTaskId} onChange={(e) => setChatTaskId(e.target.value ? Number(e.target.value) : '')} disabled={running}>
+                  {chatTaskId === '' && <option value="">pick task…</option>}
+                  {recentTasks.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      #{t.id} · {t.status} · {t.taskText.slice(0, 40)}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void sendChat();
+                  }}
+                  placeholder={chatTaskId ? `message task #${chatTaskId} - e.g. check how many docker containers are running` : 'pick a task above first'}
+                  disabled={running || !chatTaskId}
+                />
+                <button className="primary" onClick={() => void sendChat()} disabled={running || !chatTaskId || !chatInput.trim()}>
+                  send
+                </button>
+                <button className="danger" onClick={() => void killSelected()} disabled={!chatTaskId} title="mark this task stopped and reload the extension - stops any in-flight run">
+                  kill
+                </button>
+              </div>
+              {chatState && <div className="muted small">{chatState}</div>}
+            </div>
+          </Collapse>
         </div>
       )}
 

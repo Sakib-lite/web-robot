@@ -9,44 +9,79 @@ export default function App() {
   const [view, setView] = useState<'task' | 'settings'>('task');
   const { store, configs, refresh } = useProviders();
   const [remoteState, setRemoteState] = useState('idle');
-  const [backendState, setBackendState] = useState('checking backend…');
+  // null = healthy: no footer line at all. only real problems get surfaced,
+  // and the value is set once per cycle so a healthy poll never re-renders
+  const [backendError, setBackendError] = useState<string | null>(null);
   const [manualRun, setManualRun] = useState<RunState | null>(null);
   const baseDeps = useRef(panelRemoteDeps());
+  // last question id already prompted - a dismissed prompt must not nag
+  const promptedAsk = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     async function poll() {
       let url = 'unknown';
+      let error: string | null = null;
       try {
         url = await getBackendUrl();
         // /control/reload is consume-once (the worker's reload handshake) -
         // the health check must never eat that flag, so probe the queue instead
-        const res = await fetch(`${url}/queue/depth`);
+        const res = await fetch(`${url}/queue/depth`, { signal: AbortSignal.timeout(4000) });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        if (!cancelled) setBackendState(`backend ok · ${url}`);
-      } catch (error) {
-        if (!cancelled) {
-          setBackendState(`backend unreachable · ${url} · ${error instanceof Error ? error.message : String(error)}`);
+      } catch (error_) {
+        error = `backend unreachable · ${url} · ${error_ instanceof Error ? error_.message : String(error_)}`;
+      }
+
+      // mid-run clarification: a running task parked a question - prompt here
+      // so the run's ask_user wait gets a real human answer
+      if (!error) {
+        try {
+          const res = await fetch(`${url}/asks/pending`, { signal: AbortSignal.timeout(4000) });
+          if (res.ok) {
+            const q = (await res.json()) as { id: number; taskId: number; question: string } | null;
+            if (q && q.id !== promptedAsk.current) {
+              promptedAsk.current = q.id;
+              const answer = window.prompt(`web-robot asks (task #${q.taskId} is waiting):\n${q.question}`);
+              if (answer !== null && answer.trim()) {
+                await fetch(`${url}/asks/${q.id}/answer`, {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({ answer: answer.trim() }),
+                }).catch(() => undefined);
+              }
+            }
+          }
+        } catch {
+          // asking is best-effort
         }
       }
-      let outcome = '?';
-      try {
-        outcome = await maybeRunRemoteWork(baseDeps.current);
-      } catch (error) {
-        outcome = `worker threw: ${error instanceof Error ? error.message : String(error)}`;
+
+      let outcome = '';
+      if (!error) {
+        try {
+          outcome = await maybeRunRemoteWork(baseDeps.current);
+        } catch (error_) {
+          outcome = `worker threw: ${error_ instanceof Error ? error_.message : String(error_)}`;
+        }
+        if (/worker threw|fetch failed|no backend url/.test(outcome)) error = outcome;
       }
-      if (!cancelled) {
-        setBackendState((prev) => (prev.startsWith('backend unreachable') || prev.startsWith('worker') ? prev : `backend ok · ${url} · worker: ${outcome}`));
-        if (outcome === 'started') setRemoteState('claimed a queued task');
-      }
+      if (!cancelled) setBackendError((prev) => (prev === error ? prev : error));
     }
+
+    // a throttled (hidden) panel wakes with stale status - refresh the moment
+    // the page becomes visible again instead of waiting out the interval
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void poll();
+    };
+    document.addEventListener('visibilitychange', onVisible);
 
     const timer = setInterval(() => void poll(), 5000);
     void poll();
     return () => {
       cancelled = true;
       clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, []);
 
@@ -54,11 +89,11 @@ export default function App() {
     const unwrapped = baseDeps.current;
     baseDeps.current = {
       ...unwrapped,
-      runTask: async (taskId: string, taskText: string, backendUrl: string, skill?: string, model?: string, effort?: string) => {
-        setRemoteState(`claimed queued task: ${taskText.slice(0, 50)}`);
+      runTask: async (claim: { taskId: number; taskText: string }, backendUrl: string) => {
+        setRemoteState(`claimed queued task: ${claim.taskText.slice(0, 50) || `#${claim.taskId} (continuation)`}`);
         try {
-          await unwrapped.runTask(taskId, taskText, backendUrl, skill, model, effort);
-          setRemoteState(`task finished · trace ${taskId.slice(0, 8)}`);
+          await unwrapped.runTask(claim, backendUrl);
+          setRemoteState(`task finished · trace #${claim.taskId}`);
         } catch (error) {
           setRemoteState(`claim error (stays until next claim): ${error instanceof Error ? error.message : String(error)}`);
           throw error;
@@ -107,10 +142,12 @@ export default function App() {
       ) : (
         <SettingsView store={store} configs={configs} refresh={refresh} />
       )}
-      <footer className="muted small backend-state">
-        <span className={backendState.startsWith('backend ok') ? 'dot ok' : 'dot err'} aria-hidden />
-        {backendState}
-      </footer>
+      {backendError && (
+        <footer className="muted small backend-state">
+          <span className="dot err" aria-hidden />
+          {backendError}
+        </footer>
+      )}
     </main>
   );
 }
