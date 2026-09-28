@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { DbService } from './db.service';
-import { buildDebugReport, type TaskTrace } from './debug.report';
+import { DbService } from '../common/db.service';
+import { buildDebugReport, type TaskTrace } from './tasks.debug.report';
 
 @Injectable()
 export class TasksService {
@@ -48,16 +48,13 @@ export class TasksService {
       [taskId, data.status, data.summary ?? null, data.reason ?? null, data.stepCount],
     );
     if (res.rowCount === 0) throw new NotFoundException(`task ${taskId} not found`);
-    // the agent's reply is part of the task's chat history (continuations
-    // read it back as context)
+
     const reply = data.summary?.trim() || data.reason?.trim();
     if (reply) {
       await this.db.pool.query(`INSERT INTO task_messages (task_id, role, content) VALUES ($1, 'agent', $2)`, [taskId, reply]);
     }
   }
 
-  // ---- mid-run clarification: an unanswered user_answers row is a pending
-  // question; the panel prompts the user, the run polls for the answer
   async ask(taskId: number, step: number, question: string): Promise<{ id: number }> {
     const task = await this.db.pool.query(`SELECT id FROM tasks WHERE id = $1`, [taskId]);
     if (task.rowCount === 0) throw new NotFoundException(`task ${taskId} not found`);

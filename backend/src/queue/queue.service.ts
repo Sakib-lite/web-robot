@@ -1,8 +1,6 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
-import { DbService } from './db.service';
+import { DbService } from '../common/db.service';
 
-// a claimed task as handed to the runner; lastMessage is the task's latest
-// user message - when it differs from taskText the run is a continuation
 export interface ClaimedTask {
   taskId: number;
   taskText: string;
@@ -27,9 +25,7 @@ export class QueueService implements OnModuleInit {
   constructor(private readonly db: DbService) {}
 
   async onModuleInit() {
-    // the in-memory queue dies with the process; adopt rows still marked
-    // queued (or stuck in starting after a crashed claim) so a backend
-    // restart never orphans tasks the extension never ran
+
     const res = await this.db.pool.query(
       `UPDATE tasks SET status='queued'
        WHERE status IN ('queued', 'starting')
@@ -55,7 +51,7 @@ export class QueueService implements OnModuleInit {
         [taskText, skill ?? null, model ?? null, effort ?? null, context ?? null, steps?.length ? JSON.stringify(steps) : null],
       );
       taskId = res.rows[0].id as number;
-      // the driving instruction is the first entry of the task's chat history
+
       await client.query(`INSERT INTO task_messages (task_id, role, content) VALUES ($1, 'user', $2)`, [taskId, taskText]);
       await client.query('COMMIT');
     } catch (error) {
@@ -68,9 +64,6 @@ export class QueueService implements OnModuleInit {
     return { taskId };
   }
 
-  // continue a finished task with a new instruction: the row goes back to the
-  // queue and the message becomes the task's latest driving instruction; the
-  // runner picks up PLAN.md + the message history as its context
   async continueTask(taskId: number, message: string): Promise<{ queued: boolean }> {
     if (!message?.trim()) throw new Error('message is required');
     const client = await this.db.pool.connect();
@@ -101,10 +94,6 @@ export class QueueService implements OnModuleInit {
     return { queued: true };
   }
 
-  // claims must be serialized per backend process: a memory-claim that has not
-  // yet flipped its row to 'starting' must not be adoptable by the db path
-  // (panel + service worker poll within a second of each other after the
-  // panel auto-opens on claim - without this they ran the same task twice)
   private claimChain: Promise<unknown> = Promise.resolve();
 
   async next(src?: string): Promise<ClaimedTask | null> {
@@ -114,9 +103,7 @@ export class QueueService implements OnModuleInit {
   }
 
   private async claimNext(src?: string): Promise<ClaimedTask | null> {
-    // single-flight: while any worker is mid-run (busy heartbeat or a claim
-    // from moments ago), nobody else gets a task - the sw and panel poll
-    // independently and must not run two tasks in parallel
+
     const someoneBusy = [...this.workerStatuses.values()].some(
       (w) => w.state === 'busy' && Date.now() - w.ts < 20_000,
     );
@@ -124,17 +111,14 @@ export class QueueService implements OnModuleInit {
 
     const fromMemory = this.queue.shift();
     if (fromMemory) {
-      // flip the row immediately so the adoption path below (or another
-      // worker's memory-empty poll) can never hand this task out again;
-      // the row is the source of truth for text (reaper-requeued memory
-      // entries carry none)
+
       const res = await this.db.pool.query(
         `UPDATE tasks SET status='starting' WHERE id = $1 AND status='queued'
          RETURNING task_text, skill, model, effort, context, steps,
            (SELECT content FROM task_messages tm WHERE tm.task_id = tasks.id AND tm.role='user' ORDER BY tm.id DESC LIMIT 1) AS last_message`,
         [fromMemory.taskId],
       );
-      if (res.rowCount === 0) return null; // someone else already claimed it
+      if (res.rowCount === 0) return null;
       const row = res.rows[0];
       this.markClaimed(src, fromMemory.taskId);
       return {
@@ -149,9 +133,6 @@ export class QueueService implements OnModuleInit {
       };
     }
 
-    // memory empty: atomically adopt one queued row - self-heals tasks whose
-    // claim died before /start, and SKIP LOCKED keeps concurrent claimers
-    // (panel + service worker) from double-claiming
     const res = await this.db.pool.query(
       `UPDATE tasks SET status='starting'
        WHERE id IN (SELECT id FROM tasks WHERE status='queued' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
@@ -173,20 +154,11 @@ export class QueueService implements OnModuleInit {
     };
   }
 
-  // a claim is a busy marker in itself: the claimant may not heartbeat for a
-  // few seconds (long first llm call), and single-flight must hold from the
-  // instant a task is handed out
   private markClaimed(src: string | undefined, taskId: number) {
     if (!src) return;
     this.workerStatuses.set(src, { state: 'busy', currentTask: taskId, ts: Date.now() });
   }
 
-  // ---- stale-run reaper -------------------------------------------------
-  // a task in running/starting whose claimant stopped heartbeating is a zombie
-  // (extension reloaded, chrome closed, loop crashed): requeue it so a live
-  // worker resumes it; after 3 interruptions give up and fail it. sweep every
-  // 30s; a task must look dead on two consecutive sweeps (60s grace) so a
-  // claim between heartbeats is never mistaken for a corpse.
   private readonly missingSince = new Map<number, number>();
   private reaperTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -211,7 +183,7 @@ export class QueueService implements OnModuleInit {
       }
       const first = this.missingSince.get(row.id) ?? Date.now();
       this.missingSince.set(row.id, first);
-      if (Date.now() - first < 45_000) continue; // grace: dead on this sweep only is not yet a corpse
+      if (Date.now() - first < 45_000) continue;
       this.missingSince.delete(row.id);
       const attempts = Number(row.attempts ?? 0) + 1;
       if (attempts >= 3) {
@@ -285,5 +257,37 @@ export class QueueService implements OnModuleInit {
       };
     }
     return { sources };
+  }
+
+  async markRunning(taskId: number, meta: { product?: string; model?: string; effort?: string }): Promise<{ started: boolean }> {
+    await this.db.pool.query(
+      `UPDATE tasks SET status='running', product=$2, model=$3, effort=$4 WHERE id=$1`,
+      [taskId, meta.product ?? null, meta.model ?? null, meta.effort ?? null],
+    );
+    return { started: true };
+  }
+
+  async waitForTerminal(taskId: number, timeoutMs: number): Promise<{ status: string }> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const res = await this.db.pool.query(`SELECT status FROM tasks WHERE id = $1`, [taskId]);
+      const status = res.rows[0]?.status;
+      if (status && status !== 'queued' && status !== 'starting' && status !== 'running') {
+        return { status };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    return { status: 'timeout' };
+  }
+
+  async kill(taskId: number): Promise<{ stopped: boolean }> {
+    const res = await this.db.pool.query(
+      `UPDATE tasks SET status='stopped', reason='killed by user', finished_at=now()
+       WHERE id=$1 AND status IN ('queued', 'starting', 'running')`,
+      [taskId],
+    );
+    const stopped = (res.rowCount ?? 0) > 0;
+    if (stopped) this.reloadRequested = true;
+    return { stopped };
   }
 }

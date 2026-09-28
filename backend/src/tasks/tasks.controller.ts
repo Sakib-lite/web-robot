@@ -66,8 +66,6 @@ export class TasksController {
     return this.tasks.getDebugReport(id);
   }
 
-  // mid-run clarification loop: the running agent posts a question, the panel
-  // prompts the user, the answer flows back before the run proceeds
   @Post('tasks/:id/ask')
   ask(@Param('id', ParseIntPipe) id: number, @Body() body: { step: number; question: string }) {
     if (!body?.question?.trim()) throw new Error('question is required');

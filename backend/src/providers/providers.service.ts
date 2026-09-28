@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
-import { DbService } from './db.service';
+import { DbService } from '../common/db.service';
 
 export interface ProviderRow {
   product: string;
@@ -33,9 +33,6 @@ function toRow(r: DbRow): ProviderRow {
   };
 }
 
-// the browser used to be the only place the active llm config lived
-// (chrome.storage) - invisible to sql and lost with browser state; the db is
-// canonical now, chrome.storage stays as the extension's offline cache
 @Injectable()
 export class ProvidersService implements OnModuleInit {
   constructor(private readonly db: DbService) {}

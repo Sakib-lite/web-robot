@@ -12,8 +12,6 @@ const STATUS_BY_CODE: Record<string, HttpStatus> = {
   INVALID: HttpStatus.BAD_REQUEST,
 };
 
-// maps WorkspaceError to an http status and keeps the machine-readable code in
-// the body so the extension can branch on it (e.g. EXISTS → "read first")
 export function workspaceFailure(error: unknown): never {
   if (error instanceof WorkspaceError) {
     throw new HttpException({ code: error.code, message: error.message }, STATUS_BY_CODE[error.code] ?? HttpStatus.BAD_REQUEST);
@@ -38,7 +36,6 @@ export class WorkspaceController {
     return { enabled: body.enabled };
   }
 
-  // read-only skill metadata: usable even when workspace tools are disabled
   @Get('skills')
   async skills() {
     return { skills: await this.workspace.listSkills() };

@@ -114,7 +114,7 @@ describe('exec', () => {
 
   it('runs inside a per-task cwd, creating it, and still rejects escapes', async () => {
     const res = await service.exec('pwd > where.txt && pwd', undefined, 'tasks/42');
-    // pwd prints the physical path, so compare against the resolved temp dir
+
     const expected = await realpath(join(root, 'tasks/42'));
     expect(res.output.trim()).toBe(expected);
     expect((await readFile(join(root, 'tasks/42/where.txt'), 'utf8')).trim()).toBe(expected);
@@ -200,10 +200,10 @@ describe('contexts', () => {
   it('lists flat .md files, follows symlinks, and serves bodies on demand', async () => {
     await mkdir(join(root, 'contexts'), { recursive: true });
     await writeFile(join(root, 'contexts', 'profile-professional.md'), '# professional\n- senior swe, backend + ai\n');
-    // symlinked context: the file lives elsewhere (kept in sync by its owner)
+
     await writeFile(join(root, 'source-education.md'), '# education\n- bsc cse, cgpa 3.9\n');
     await symlink('../source-education.md', join(root, 'contexts', 'profile-education.md'));
-    // non-markdown and directories are ignored
+
     await writeFile(join(root, 'contexts', 'notes.txt'), 'not a context');
     await mkdir(join(root, 'contexts', 'draft.md'));
 
@@ -217,7 +217,7 @@ describe('contexts', () => {
   });
 
   it('rejects missing contexts and bad slugs', async () => {
-    // shared root: other tests may have created contexts - only assert absence
+
     expect((await service.listContexts()).find((c) => c.slug === 'ghost-context')).toBeUndefined();
     await expectCode(service.getContext('ghost-context'), 'NOT_FOUND');
     await expectCode(service.getContext('../evil'), 'INVALID');

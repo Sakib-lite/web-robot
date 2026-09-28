@@ -67,7 +67,6 @@ CREATE TABLE IF NOT EXISTS task_messages (
 CREATE INDEX IF NOT EXISTS task_messages_task_idx ON task_messages(task_id, id);
 `;
 
-// idempotent additions for databases created before the feature landed
 const MIGRATIONS = [
   `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS skill TEXT`,
   `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS attempts INT NOT NULL DEFAULT 0`,
@@ -107,10 +106,6 @@ export class DbService implements OnModuleInit {
     }
   }
 
-  // one-time conversion for databases created before task ids became
-  // sequential integers: rewrite uuid pk/fks in place, assigning integers in
-  // created_at order so ids stay chronological and the sequence continues
-  // past the highest assigned value
   private async migrateUuidTaskIds(): Promise<void> {
     const col = await this.pool.query(
       `SELECT data_type FROM information_schema.columns

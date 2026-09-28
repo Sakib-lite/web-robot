@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ProvidersService } from './providers.service';
 
-// tiny in-memory emulation of the llm_providers table - the service's sql is
-// a fixed set of statements, so routing on fragments keeps the test hermetic
 function fakeDb() {
   const rows = new Map<string, { product: string; api_key: string | null; base_url: string | null; model: string | null; effort: string | null; active: boolean; updated_at: Date }>();
   const pool = {
@@ -60,7 +58,7 @@ describe('ProvidersService', () => {
     const { service } = fakeDb();
     await service.upsert('glm', { apiKey: 'k1', baseUrl: 'https://z.ai', model: 'glm-5.3', effort: 'high' });
     await service.upsert('ollama', { baseUrl: 'http://127.0.0.1:11434/v1', model: 'gpt-oss:20b' });
-    // partial update: only the model changes
+
     await service.upsert('glm', { model: 'GLM-5.3-Flash' });
     const glm = await service.list();
     expect(glm.map((r) => r.product)).toEqual(['glm', 'ollama']);

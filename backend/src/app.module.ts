@@ -1,16 +1,11 @@
 import { Module } from '@nestjs/common';
-import { DbService } from './db.service';
-import { TasksService } from './tasks.service';
-import { TasksController } from './tasks.controller';
-import { QueueService } from './queue.service';
-import { QueueController } from './queue.controller';
-import { WorkspaceService } from './workspace.service';
-import { WorkspaceController } from './workspace.controller';
-import { ProvidersService } from './providers.service';
-import { ProvidersController } from './providers.controller';
+import { DbModule } from './common/db.module';
+import { TasksModule } from './tasks/tasks.module';
+import { QueueModule } from './queue/queue.module';
+import { WorkspaceModule } from './workspace/workspace.module';
+import { ProvidersModule } from './providers/providers.module';
 
 @Module({
-  controllers: [TasksController, QueueController, WorkspaceController, ProvidersController],
-  providers: [DbService, TasksService, QueueService, WorkspaceService, ProvidersService],
+  imports: [DbModule, TasksModule, QueueModule, WorkspaceModule, ProvidersModule],
 })
 export class AppModule {}

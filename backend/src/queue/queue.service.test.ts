@@ -21,15 +21,14 @@ function queueService(adopted: Array<{ id: number; task_text: string }> = [], in
       lastSteps = typeof rawSteps === 'string' ? (JSON.parse(rawSteps) as string[]) : Array.isArray(rawSteps) ? (rawSteps as string[]) : null;
       return { rows: [{ id }] };
     }
-    // claim-flip UPDATE (memory path): returns the row (db truth) and
-    // rowCount 0 when scripted to lose the race
+
     if (sql.includes(`SET status='starting' WHERE id`)) {
       const id = Number(params?.[0]);
       return { rows: [{ task_text: texts.get(id) ?? '', skill: null, ...(lastSteps ? { steps: lastSteps } : {}) }], rowCount: id === -1 ? 0 : 1 };
     }
     return { rows: [{ id: queries.length }] };
   };
-  // enqueue/continue use a transaction client; delegate to the same handler
+
   const client = { query: run, release: () => {} };
   const service = new QueueService({
     pool: { query: run, connect: async () => client },
@@ -43,7 +42,7 @@ describe('QueueService', () => {
     const res = await service.enqueue('list repos');
     expect(res.taskId).toBe(1);
     expect(queries.some(([sql]) => sql.includes(`VALUES ($1, $2, $3, $4, $5, $6, 'queued')`))).toBe(true);
-    // the driving instruction becomes the task's first chat message
+
     expect(queries.some(([sql, params]) => sql.includes('INSERT INTO task_messages') && params?.[0] === 1)).toBe(true);
     expect(service.depth()).toBe(1);
   });
@@ -96,7 +95,7 @@ describe('QueueService single-flight + reaper + retry', () => {
   it('allows claims again once the busy heartbeat is stale', async () => {
     const { service } = queueService();
     service.reportWorkerStatus('sw', 'busy', 999);
-    // age it beyond the 20s window by backdating through a second report + manual map poke
+
     (service as unknown as { workerStatuses: Map<string, { state: string; currentTask?: number; ts: number }> })
       .workerStatuses.get('sw')!.ts = Date.now() - 30_000;
     await service.enqueue('a');
@@ -128,12 +127,12 @@ describe('QueueService single-flight + reaper + retry', () => {
       },
     };
     const service = new QueueService({ pool } as never);
-    // first sweep: grace (dead once is not a corpse)
+
     expect(await service.reapStaleRuns()).toEqual({ requeued: [], failed: [] });
-    // age the sighting past the grace window, then sweep again: requeued
+
     (service as unknown as { missingSince: Map<number, number> }).missingSince.set(201, Date.now() - 60_000);
     expect(await service.reapStaleRuns()).toEqual({ requeued: [201], failed: [] });
-    // a worker still alive on its task is never reaped
+
     service.reportWorkerStatus('panel', 'busy', 202);
     (service as unknown as { workerStatuses: Map<string, { currentTask?: number; ts: number }> })
       .workerStatuses.get('panel')!.currentTask = 202;

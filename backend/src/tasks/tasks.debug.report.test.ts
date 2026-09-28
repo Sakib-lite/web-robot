@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDebugReport, type TaskTrace } from './debug.report';
+import { buildDebugReport, type TaskTrace } from './tasks.debug.report';
 
 function trace(over: Partial<TaskTrace> = {}): TaskTrace {
   const createdAt = new Date('2026-11-14T08:00:00Z');

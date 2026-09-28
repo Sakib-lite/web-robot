@@ -4,8 +4,6 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import * as fs from 'node:fs/promises';
 
-// caps mirrored from docs/rnd-local-agentic-worker.md §2.1 - every number here
-// exists to keep file content from flooding the model context or the db
 export const READ_DEFAULT_LIMIT = 300;
 export const READ_MAX_LIMIT = 1000;
 const READ_LINE_TRUNCATE = 500;
@@ -17,8 +15,6 @@ const EXEC_DEFAULT_TIMEOUT_MS = 120_000;
 const EXEC_MAX_TIMEOUT_MS = 600_000;
 const EXEC_OUTPUT_CAP = 8 * 1024;
 
-// a cheap deny-list of catastrophic classics - the workspace root is the real
-// blast-radius boundary; this list just blocks the obviously unrecoverable
 const DENY_PATTERNS: Array<[RegExp, string]> = [
   [/\bsudo\b/, 'sudo'],
   [/\bosascript\b/, 'osascript'],
@@ -89,11 +85,6 @@ export class WorkspaceService implements OnModuleInit {
     return this.root;
   }
 
-  // ---- skills ------------------------------------------------------------
-  // a skill is skills/<slug>/SKILL.md with a simple `key: value` frontmatter
-  // (name, description, and optional model/effort/maxSteps defaults); only
-  // name+description are listed - the body is loaded on selection
-
   private parseFrontmatter(raw: string): { meta: Record<string, string>; body: string } {
     const match = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(raw);
     if (!match) return { meta: {}, body: raw };
@@ -111,7 +102,7 @@ export class WorkspaceService implements OnModuleInit {
     try {
       dirents = await fs.readdir(skillsDir, { withFileTypes: true });
     } catch {
-      return []; // no skills yet
+      return [];
     }
     const skills: Array<{ slug: string; name: string; description: string }> = [];
     for (const dirent of dirents) {
@@ -125,7 +116,7 @@ export class WorkspaceService implements OnModuleInit {
           description: meta.description ?? '',
         });
       } catch {
-        // dir without SKILL.md - skip
+
       }
     }
     skills.sort((a, b) => a.name.localeCompare(b.name));
@@ -154,26 +145,23 @@ export class WorkspaceService implements OnModuleInit {
     };
   }
 
-  // shared background profiles: flat .md files (symlinks welcome - e.g. to
-  // files maintained elsewhere) inside contexts/, attached to a task from the
-  // panel dropdown or --context so "find jobs for this profile" works
   async listContexts(): Promise<Array<{ slug: string; bytes: number }>> {
     const contextsDir = join(this.root, 'contexts');
     let names: string[];
     try {
       names = await fs.readdir(contextsDir);
     } catch {
-      return []; // no contexts yet
+      return [];
     }
     const contexts: Array<{ slug: string; bytes: number }> = [];
     for (const name of names.sort()) {
       if (!name.endsWith('.md')) continue;
       try {
-        const stat = await fs.stat(join(contextsDir, name)); // follows symlinks
+        const stat = await fs.stat(join(contextsDir, name));
         if (!stat.isFile()) continue;
         contexts.push({ slug: name.replace(/\.md$/, ''), bytes: stat.size });
       } catch {
-        // broken symlink - skip
+
       }
     }
     return contexts;
@@ -212,9 +200,6 @@ export class WorkspaceService implements OnModuleInit {
     return target;
   }
 
-  // symlink escape guard: realpath the deepest existing ancestor and make sure
-  // it still lives under the real root - the non-existing remainder cannot be
-  // a symlink, so the whole target is then provably inside
   private async assertNoSymlinkEscape(target: string, rel: string) {
     if (!this.realRoot) await this.onModuleInit();
     let existing = target;
@@ -256,7 +241,7 @@ export class WorkspaceService implements OnModuleInit {
           size = stat.size;
           mtime = stat.mtime.toISOString().slice(0, 10);
         } catch {
-          // dangling symlink or raced delete - still list the name
+
         }
       }
       entries.push({ name: dirent.name, dir: dirent.isDirectory(), size, mtime });
@@ -281,7 +266,7 @@ export class WorkspaceService implements OnModuleInit {
       throw new WorkspaceError('NOT_FOUND', `"${rel}" does not exist`);
     }
     const all = content.split('\n');
-    // a trailing newline terminates the last line, it is not an extra empty one
+
     if (all.length > 1 && all[all.length - 1] === '') all.pop();
     const totalLines = all.length;
     const start = Math.max(1, Math.floor(offset));
@@ -311,7 +296,7 @@ export class WorkspaceService implements OnModuleInit {
         );
       } catch (error) {
         if (error instanceof WorkspaceError && error.code === 'EXISTS') throw error;
-        // NOT_FOUND-style errors fall through to the write
+
       }
     }
     await this.ensureParent(target);
@@ -350,8 +335,7 @@ export class WorkspaceService implements OnModuleInit {
     const target = this.assertInside(rel);
     await this.assertNoSymlinkEscape(target, rel);
     await this.ensureParent(target);
-    // explicit trailing-newline handling: an append starting mid-line is
-    // almost always a model formatting mistake
+
     const needsNewline = await fileEndsWithoutNewline(target);
     const payload = (needsNewline && !text.startsWith('\n') ? '\n' : '') + text;
     const fh = await fs.open(target, 'a');
@@ -394,8 +378,6 @@ export class WorkspaceService implements OnModuleInit {
     const timeout = Math.min(Math.max(1000, Math.floor(timeoutMs)), EXEC_MAX_TIMEOUT_MS);
     const started = Date.now();
 
-    // optional per-task cwd (relative to the workspace root): a task's
-    // relative-path output files land inside its own folder
     let runDir = this.root;
     if (cwd) {
       const target = this.assertInside(cwd);
@@ -405,12 +387,10 @@ export class WorkspaceService implements OnModuleInit {
     }
 
     return await new Promise<ExecResult>((resolve) => {
-      // --noprofile --norc: a workspace command must never source the user's
-      // shell profile
+
       const child = spawn('bash', ['--noprofile', '--norc', '-c', cmd], { cwd: runDir });
       let timedOut = false;
-      // bounded head+tail capture: unlimited output must never grow memory,
-      // and the cap must keep the end (exit errors, last lines) not just the start
+
       const KEEP = EXEC_OUTPUT_CAP;
       const head: Buffer[] = [];
       let headLen = 0;
@@ -479,7 +459,7 @@ async function fileEndsWithoutNewline(target: string): Promise<boolean> {
     await fh.read(buffer, 0, 1, stat.size - 1);
     return buffer.toString('utf8') !== '\n';
   } catch {
-    return false; // file does not exist yet - a fresh file needs no separator
+    return false;
   } finally {
     await fh?.close();
   }
