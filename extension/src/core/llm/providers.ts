@@ -107,7 +107,6 @@ export function createProductStore(area: StorageArea): ProductStore {
 }
 
 export async function seedFromEnv(store: ProductStore, envSeed: LlmProvider | null = ENV_SEED) {
-  // chrome.storage rejects undefined values - null is the clear sentinel
   await store.area.set({ [LEGACY_KEY]: null });
   if (!envSeed) return;
   const existing = await store.get('glm');
@@ -124,8 +123,6 @@ export async function resolveActiveProvider(
   if (backend) {
     const remote = await fetchActiveProviderFromBackend(backend.url, backend.fetchFn).catch(() => null);
     if (remote) {
-      // the db is canonical - chrome.storage stays as a warm offline cache
-      // for runs when the backend is down
       void store
         .save(remote)
         .then(() => store.activate(remote.productId))
@@ -137,7 +134,6 @@ export async function resolveActiveProvider(
   return configs.find((c) => c.active) ?? null;
 }
 
-// maps the backend's llm_providers row (web_robot db) onto a runtime provider
 export async function fetchActiveProviderFromBackend(backendUrl: string, fetchFn: typeof fetch = fetch): Promise<LlmProvider | null> {
   const res = await fetchFn(`${backendUrl}/providers/active`, { signal: AbortSignal.timeout(3000) });
   if (!res.ok) return null;
@@ -153,7 +149,6 @@ export async function fetchActiveProviderFromBackend(backendUrl: string, fetchFn
   };
 }
 
-// settings write-through: the db is the canonical store, chrome.storage the cache
 export async function syncConfigToBackend(
   backendUrl: string,
   input: ProductConfigInput & { activate?: boolean },

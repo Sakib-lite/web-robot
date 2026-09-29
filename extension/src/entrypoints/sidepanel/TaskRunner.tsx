@@ -6,7 +6,9 @@ import { chatCompletion, type ChatMessage, type ChatResponse, type ToolDef } fro
 import { resolveActiveProvider, type ProductStore, type StoredProductConfig } from '@/core/llm/providers';
 import { getProduct, type Effort } from '@/core/llm/products';
 import { getBackendUrl } from '@/core/telemetry/settings';
-import { Chevron, Collapse } from './SettingsView';
+import { Chevron, Collapse } from './common/ui';
+import { StepsEditor } from './StepsEditor';
+import { ChatSection } from './ChatSection';
 import { startTelemetry } from '@/core/telemetry/client';
 import ResultView from './ResultView';
 
@@ -78,7 +80,6 @@ export default function TaskRunner({
           if (finished) setChatTaskId(finished.id);
         }
       } catch {
-        // backend down - dropdowns just stay empty
       }
     })();
   }, []);
@@ -93,7 +94,6 @@ export default function TaskRunner({
 
     const backendUrl = await getBackendUrl();
 
-    // db (backend) is the canonical provider store; falls back to chrome.storage when unreachable
     const provider = await resolveActiveProvider(store, undefined, { url: backendUrl });
     if (!provider) {
       setError('no active llm provider - add one in settings first');
@@ -105,8 +105,6 @@ export default function TaskRunner({
     const controller = new AbortController();
     abortRef.current = controller;
 
-    // per-task model/effort picked in the config bar win; a selected skill
-    // fills only what was not chosen explicitly
     let runProvider = provider;
     if (model) runProvider = { ...runProvider, model };
     if (effort) runProvider = { ...runProvider, thinking: effort as Effort };
@@ -118,12 +116,10 @@ export default function TaskRunner({
     );
     if (telemetry.taskId) setTraceInfo({ taskId: telemetry.taskId, backendUrl });
 
-    // local workspace hands, when the backend offers them
     const plane = createHttpPlane(() => Promise.resolve(backendUrl));
     const workspaceInfo = await plane.describe().catch(() => null);
     const workspace = workspaceInfo?.enabled ? { plane, root: workspaceInfo.root } : undefined;
 
-    // typing "/slug ..." selects the skill inline
     let selected = skill;
     let taskText = task;
     const slash = /^\/([a-z0-9-]+)\s+([\s\S]+)/i.exec(task.trim());
@@ -144,11 +140,8 @@ export default function TaskRunner({
           if (full.body) preamble = `SKILL "${full.name ?? selected}" - follow this workflow for the whole task:\n\n${full.body}`.slice(0, 8000);
         }
       } catch {
-        // missing skill runs without the preamble
       }
     }
-    // an attached context (a shared profile etc.) rides along as facts for
-    // the whole task - same injection as the queue-worker path
     if (context) {
       try {
         const res = await fetch(`${backendUrl}/contexts/${encodeURIComponent(context)}`);
@@ -160,14 +153,11 @@ export default function TaskRunner({
           }
         }
       } catch {
-        // missing context runs without the preamble
       }
     }
     const skillChat = (messages: ChatMessage[], tools: ToolDef[]): Promise<ChatResponse> =>
       chatCompletion(runProvider, { messages, tools, maxTokens: 8192, signal: controller.signal });
 
-    // heartbeat busy+currentTask during manual runs: the backend reaper must
-    // see this run as alive or it will requeue the row mid-run
     const heartbeat = (state: string) =>
       fetch(`${backendUrl}/worker/status`, {
         method: 'POST',
@@ -209,7 +199,6 @@ export default function TaskRunner({
       setRunning(false);
       onRunningChange(null);
       abortRef.current = null;
-      // the finished task becomes the chat target; recent list refreshes
       if (telemetry.taskId) setChatTaskId(telemetry.taskId);
       void (async () => {
         try {
@@ -219,7 +208,6 @@ export default function TaskRunner({
             if (Array.isArray(body)) setRecentTasks(body);
           }
         } catch {
-          // best-effort
         }
       })();
     }
@@ -285,25 +273,7 @@ export default function TaskRunner({
         />
 
         {stepsMode && (
-          <div className="steps-editor">
-            {taskSteps.map((s, i) => (
-              <div key={i} className="step-row">
-                <span className="step-n">{i + 1}</span>
-                <input
-                  value={s}
-                  onChange={(e) => setStepAt(i, e.target.value)}
-                  placeholder={`step ${i + 1} - e.g. ${i === 0 ? 'check all posts, list every uni in unis.md' : i === 1 ? 'write ielts-requirements.md per uni' : 'verify both files'}`}
-                  disabled={running}
-                />
-                <button className="icon-btn" onClick={() => removeStep(i)} disabled={running || taskSteps.length === 1} title="remove step">
-                  ×
-                </button>
-              </div>
-            ))}
-            <button className="ghost" onClick={() => setTaskSteps((prev) => [...prev, ''])} disabled={running}>
-              + add step
-            </button>
-          </div>
+          <StepsEditor steps={taskSteps} running={running} onSet={setStepAt} onRemove={removeStep} onAdd={() => setTaskSteps((prev) => [...prev, ''])} />
         )}
       </Collapse>
 
@@ -404,45 +374,19 @@ export default function TaskRunner({
         </div>
       )}
 
-      {recentTasks.length > 0 && (
-        <div className="chat-section">
-          <button type="button" className="card-head" onClick={() => setChatOpen((v) => !v)} aria-expanded={chatOpen}>
-            <span className="card-title">chat / continue a task</span>
-            <span className="card-summary">{chatTaskId ? `#${chatTaskId} selected` : `${recentTasks.length} recent`}</span>
-            <Chevron open={chatOpen} />
-          </button>
-          <Collapse open={chatOpen}>
-            <div className="chat-bar">
-              <div className="row">
-                <select value={chatTaskId} onChange={(e) => setChatTaskId(e.target.value ? Number(e.target.value) : '')} disabled={running}>
-                  {chatTaskId === '' && <option value="">pick task…</option>}
-                  {recentTasks.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      #{t.id} · {t.status} · {t.taskText.slice(0, 40)}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') void sendChat();
-                  }}
-                  placeholder={chatTaskId ? `message task #${chatTaskId} - e.g. check how many docker containers are running` : 'pick a task above first'}
-                  disabled={running || !chatTaskId}
-                />
-                <button className="primary" onClick={() => void sendChat()} disabled={running || !chatTaskId || !chatInput.trim()}>
-                  send
-                </button>
-                <button className="danger" onClick={() => void killSelected()} disabled={!chatTaskId} title="mark this task stopped and reload the extension - stops any in-flight run">
-                  kill
-                </button>
-              </div>
-              {chatState && <div className="muted small">{chatState}</div>}
-            </div>
-          </Collapse>
-        </div>
-      )}
+      <ChatSection
+        recentTasks={recentTasks}
+        chatTaskId={chatTaskId}
+        chatInput={chatInput}
+        chatState={chatState}
+        open={chatOpen}
+        running={running}
+        onToggle={() => setChatOpen((v) => !v)}
+        onPick={setChatTaskId}
+        onInput={setChatInput}
+        onSend={() => void sendChat()}
+        onKill={() => void killSelected()}
+      />
 
       {result && <ResultView result={result} />}
     </div>

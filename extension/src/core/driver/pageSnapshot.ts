@@ -128,9 +128,6 @@ export function describeElement(el: Element, index: number): ElementInfo {
 export function buildSnapshot(doc: Document): Snapshot {
   const total = countInteractive(doc);
   const elements = collectInteractive(doc).map((el, index) => describeElement(el, index));
-  // main-content text first, but an SPA's <main> can be a near-empty shell
-  // (a detail-pane placeholder) while the real content lives elsewhere -
-  // when the body is several times richer, take the whole body instead
   const mainRoot = doc.querySelector('main, [role="main"], article') as HTMLElement | null;
   let rawText = mainRoot?.innerText ?? '';
   if (doc.body) {

@@ -26,7 +26,6 @@ export interface LlmProduct {
   defaults: { baseUrl: string; model: string };
   models?: string[];
   efforts?: Effort[];
-  // local endpoints (ollama) need no api key - settings skips the key checks
   keyless?: boolean;
   buildPayload: (provider: LlmProvider, req: ProductBuildInput) => WirePayload;
 }
@@ -38,8 +37,6 @@ function resolveModel(provider: LlmProvider, requested: string | undefined): str
   return effectiveModel(requested, provider) ?? provider.model;
 }
 
-// verified against the coding endpoint: reasoning_effort=off is rejected,
-// low/high/max are honored, thinking.disabled suppresses reasoning entirely
 function glmEffortWire(provider: LlmProvider): Pick<WirePayload, 'thinking' | 'reasoning_effort'> {
   switch (provider.thinking ?? 'off') {
     case 'off':
@@ -96,8 +93,6 @@ export const openaiProduct: LlmProduct = {
   }),
 };
 
-// ollama's /v1 OpenAI-compatible endpoint; gpt-oss honors reasoning_effort
-// (low|high) there - "off" simply omits the knob and uses the model default
 export const ollamaProduct: LlmProduct = {
   id: 'ollama',
   label: 'Ollama (local)',

@@ -1,6 +1,7 @@
 import type { ChatMessage, ChatResponse, ToolDef } from '../llm/chatClient';
 import type { Action, Driver, Snapshot } from '../driver/types';
 import type { LocalPlane } from '../local/plane';
+import { runLocal, type LocalOutcome } from './runLocal';
 import { PlaneError } from '../local/plane';
 import { describeLocal, parseCall, toolDefs, type LocalCall } from './tools';
 import { observationBlock, systemPrompt, taskContext } from './prompts';
@@ -36,15 +37,9 @@ export interface LoopDeps {
   onStep?: (step: StepRecord) => void;
   telemetry?: LoopTelemetry;
   workspace?: { plane: LocalPlane; root: string };
-  // ties the run to its PLAN.md scratch file (.web-robot/tasks/<taskId>/) so
-  // an interrupted task resumes instead of restarting from zero
   taskId?: number;
-  // user-defined ordered steps: seeded as the initial milestone plan; the
-  // agent decides HOW to execute each, in its own order of operations
   steps?: string[];
-  // extra system instructions (a selected skill's body)
   preamble?: string;
-  // close agent-opened tabs when the run ends (default true)
   cleanupTabs?: boolean;
 }
 
@@ -61,9 +56,6 @@ const EXEC_TOTAL_SOFT = 40;
 const FILE_OPS_NUDGE = 20;
 const FILE_OPS_BLOCK = 35;
 
-// guards the exec spiral: one big file sliced across dozens of grep/sed
-// turns. counts total execs and per-file mentions (file tools and filenames
-// inside shell commands); nudges early, blocks hard.
 function execSpiralGuard(
   call: LocalCall,
   execCount: { total: number },
@@ -122,106 +114,6 @@ export function parsePlanMd(md: string): { milestones: Array<{ text: string; don
   return { milestones, findings };
 }
 
-interface LocalOutcome {
-  ok: boolean;
-  detail: string;
-  label?: string;
-  text?: string | null;
-  // resolved workspace-relative path, set when the op touched a file
-  path?: string;
-  durationMs: number;
-}
-
-async function runLocal(call: LocalCall, plane: LocalPlane, ledger: Set<string>, taskDir: string | null): Promise<LocalOutcome> {
-  const started = Date.now();
-  const dur = () => Date.now() - started;
-  // every file a task creates must live in its own task folder: relative
-  // paths resolve into taskDir (skills/ stays shared, already-scoped paths
-  // pass through) and the resolved path is echoed back so the model works
-  // with real locations from the first write
-  const resolve = (p?: string): string | undefined => {
-    if (!p) return p;
-    const cleaned = p.replace(/^\.\//, '');
-    if (!taskDir || cleaned.startsWith(taskDir) || cleaned.startsWith('skills/')) return cleaned;
-    return `${taskDir}/${cleaned}`;
-  };
-  try {
-    switch (call.op) {
-      case 'list_dir': {
-        const path = resolve(call.path);
-        const { entries, truncated } = await plane.list(path);
-        const text = entries
-          .map((e) => `${e.name}${e.dir ? '/' : ''}${e.dir ? '' : ` · ${e.size ?? '?'} B`}${e.mtime ? ` · ${e.mtime}` : ''}`)
-          .join('\n');
-        return { ok: true, detail: `${entries.length} entries${truncated ? ' (truncated at 200)' : ''}`, label: `list ${path ?? '.'}`, text: text || '(empty directory)', durationMs: dur() };
-      }
-      case 'read_file': {
-        const path = resolve(call.path)!;
-        const slice = await plane.read(path, call.offset, call.limit);
-        ledger.add(path);
-        const end = slice.offset + slice.lines.length - 1;
-        const text = slice.lines.map((l) => `${l.n}\t${l.text}`).join('\n');
-        return {
-          ok: true,
-          detail: `lines ${slice.offset}-${end} of ${slice.totalLines}`,
-          label: `${path} (lines ${slice.offset}-${end} of ${slice.totalLines})`,
-          text: text || '(empty file)',
-          durationMs: dur(),
-        };
-      }
-      case 'write_file': {
-        const path = resolve(call.path)!;
-        if (!ledger.has(path)) {
-          // unexplored path: try create-only; an EXISTS reply means the model
-          // is blind-overwriting a file it never read
-          try {
-            const res = await plane.write(path, call.content, true);
-            return { ok: true, detail: `created ${path} (${res.bytes} bytes)`, path, text: null, durationMs: dur() };
-          } catch (error) {
-            if (error instanceof PlaneError && error.code === 'EXISTS') {
-              return { ok: false, detail: error.message, text: null, durationMs: dur() };
-            }
-            throw error;
-          }
-        }
-        const res = await plane.write(path, call.content);
-        return { ok: true, detail: `wrote ${res.bytes} bytes to ${path}`, path, text: null, durationMs: dur() };
-      }
-      case 'edit_file': {
-        const path = resolve(call.path)!;
-        if (!ledger.has(path)) {
-          return { ok: false, detail: `blocked: read_file ${path} first - blind edits are not allowed`, text: null, durationMs: dur() };
-        }
-        const res = await plane.edit(path, call.oldString, call.newString, call.replaceAll);
-        return { ok: true, detail: `replaced ${res.occurrences} occurrence(s) at line ${res.line}`, path, text: null, durationMs: dur() };
-      }
-      case 'append_file': {
-        const path = resolve(call.path)!;
-        const res = await plane.append(path, call.text);
-        return { ok: true, detail: `appended ${res.bytes} bytes to ${path} (file now ${res.totalBytes} bytes)`, path, text: null, durationMs: dur() };
-      }
-      case 'delete_path': {
-        const path = resolve(call.path)!;
-        await plane.delete(path);
-        return { ok: true, detail: `deleted ${path}`, text: null, durationMs: dur() };
-      }
-      case 'mkdir': {
-        const path = resolve(call.path)!;
-        await plane.mkdir(path);
-        return { ok: true, detail: `created ${path}`, text: null, durationMs: dur() };
-      }
-      case 'exec': {
-        const res = await plane.exec(call.cmd, call.timeoutMs, taskDir ?? undefined);
-        const summary = `exit ${res.code} (${(res.durationMs / 1000).toFixed(1)}s)${res.timedOut ? ' - TIMED OUT' : ''}`;
-        const text = res.output.trim();
-        return { ok: res.code === 0, detail: summary, label: `exec ${call.cmd.slice(0, 80)}`, text: text ? `${summary}\n${text}` : null, durationMs: dur() };
-      }
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { ok: false, detail: message.slice(0, 300), text: null, durationMs: dur() };
-  }
-}
 
 export function isDangerous(action: Action, snapshot: Snapshot | null): string | null {
   if (action.type !== 'click') return null;
@@ -242,9 +134,6 @@ function normalizeUrlForCompare(raw: string): string {
 }
 
 function actionKey(action: Action, snapshot: Snapshot | null): string {
-  // page-state fingerprint must catch in-place UI changes (accordion expands,
-  // tab switches, text appearing below the fold) or legitimate retries get
-  // counted as loops
   const state = snapshot
     ? [
         snapshot.url,
@@ -254,13 +143,9 @@ function actionKey(action: Action, snapshot: Snapshot | null): string {
       ].join('|')
     : 'none';
 
-  // goto/new_tab to the same url are the same navigation intent - alternating
-  // between them must not evade repeat blocking
   if (action.type === 'goto') return `nav:${normalizeUrlForCompare(action.url)}|${state}`;
   if (action.type === 'new_tab') return `nav:${action.url ? normalizeUrlForCompare(action.url) : 'about:blank'}|${state}`;
   if (action.type === 'switch_tab' || action.type === 'close_tab') return `nav:tab:${action.tabId}|${state}`;
-  // extract ignores the goal wording: re-asking the same page in different
-  // words is the same no-op and must count toward blocking
   if (action.type === 'extract') return `extract|${state}`;
   return `${JSON.stringify(action)}|${state}`;
 }
@@ -301,30 +186,17 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   const agentNotes: string[] = [];
   const repeatCounts = new Map<string, number>();
   const blockedKeys = new Set<string>();
-  // files read this task - edit_file and overwrites are refused until the
-  // model has actually seen the content (ZCode's read-before-edit rule)
   const readLedger = new Set<string>();
-  // only the latest read/list/exec output stays in context, bounded - older
-  // ones live on in the step log as one-liners
   let latestLocal: { label: string; text: string } | null = null;
-  // spiral guards for local tools: the classic failure is 100+ grep/sed
-  // slices of one big file, each a full agent turn that forgot the last
   const execCount = { total: 0 };
   const fileOps = new Map<string, number>();
-  // rolling memory of recent exec results so the model never re-runs a
-  // command whose output it already saw (exec amnesia)
   let execDigests: string[] = [];
-  // milestone plan + its PLAN.md mirror: written by loop code, not model turns
   let plan: Array<{ text: string; done: boolean }> | null = null;
   const planFindings: string[] = [];
   let planFileInit = false;
-  // every file this task touches lives under its own folder - see runLocal's
-  // path resolver; the plan file shares it so resume works unchanged
   const taskDir = deps.taskId != null ? `.web-robot/tasks/${deps.taskId}` : null;
-  // files this task wrote/edited (resolved workspace-relative, insertion order)
   const filesTouched = new Map<string, string>();
   const planPath = taskDir ? `${taskDir}/PLAN.md` : null;
-  // tabs this run opened - marked in observations, budget-capped, closed at end
   const ownedTabs = new Map<number, string>();
   let reinvestigations = 0;
   let consecutiveBlocked = 0;
@@ -348,7 +220,6 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       await deps.workspace.plane.write(planPath, md);
       planFileInit = true;
     } catch {
-      // the plan also lives in context; a failed write must not kill the run
     }
   }
 
@@ -364,12 +235,9 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     try {
       await deps.workspace.plane.append(planPath, `- ${text}\n`);
     } catch {
-      // same tolerance as above
     }
   }
 
-  // resume-on-reclaim: a re-queued task that already has a PLAN.md restarts
-  // with its milestones and findings instead of from zero
   if (deps.workspace && planPath) {
     try {
       const slice = await deps.workspace.plane.read(planPath, 1, 400);
@@ -384,11 +252,8 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
         );
       }
     } catch {
-      // no plan yet - first run
     }
   }
-  // user-defined steps seed the milestone plan (the agent still decides HOW
-  // to execute each one); skipped when a resumed PLAN.md already exists
   if (deps.steps && deps.steps.length > 0 && !plan) {
     plan = deps.steps.map((text, i) => ({ text: `STEP ${i + 1}: ${text}`, done: false }));
     await persistPlan();
@@ -401,9 +266,6 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     deps.onStep?.(step);
   }
 
-  // failure re-investigation: before accepting any failure, one verdict call
-  // decides resume (with a concrete next instruction + fresh step budget) or
-  // confirmed failure - partial progress beats giving up
   async function reinvestigate(reason: string): Promise<{ resume: string } | { giveUp: true }> {
     if (reinvestigations >= 2) return { giveUp: true };
     reinvestigations++;
@@ -455,7 +317,6 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       try {
         await deps.driver.act({ type: 'close_tab', tabId });
       } catch {
-        // already closed by the user - nothing to do
       }
     }
     ownedTabs.clear();
@@ -480,7 +341,6 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       tabs = await deps.driver.tabs();
       snapshot = await deps.driver.snapshot();
     } catch {
-      // no accessible page yet; the observation block reports that
     }
     await deps.telemetry?.observe(index + 1, {
       tabs,
@@ -575,8 +435,6 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
 
     const agentCall = parsed.call;
     if (agentCall.kind === 'done') {
-      // every file the task touched, surfaced with its absolute path so the
-      // user can open results without hunting through the workspace
       let summary = agentCall.summary;
       if (filesTouched.size > 0) {
         const root = deps.workspace?.root;

@@ -46,8 +46,6 @@ function pageOutline(doc: Document): string {
   return [...new Set(headings)].slice(0, 25).join('\n');
 }
 
-// goal-aware extraction: return lines matching the goal with context, plus a
-// page outline so the model can see what else exists instead of re-asking
 export function extractForGoal(doc: Document, goal: string): string {
   const root = doc.querySelector('main, [role="main"], article') ?? doc.body;
   const fullText = (root?.textContent ?? '')
@@ -112,8 +110,6 @@ async function click(resolve: ElementRef, ref: string): Promise<ActionResult> {
   const el = found.el as HTMLElement;
   el.scrollIntoView({ block: 'center' });
 
-  // full input-event sequence: some widget libraries (jQuery UI, Drupal
-  // accordions) ignore a bare click() but respond to the pointer/mouse chain
   const rect = el.getBoundingClientRect();
   const x = rect.left + rect.width / 2;
   const y = rect.top + rect.height / 2;

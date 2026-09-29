@@ -34,7 +34,6 @@ async function post(url: string, body: unknown): Promise<Response> {
   });
 }
 
-// telemetry must never break a run: every call swallows its errors
 export async function startTelemetry(meta: TaskMeta, backendUrl: string): Promise<TaskTelemetry> {
   let taskId: number | null = null;
   try {
@@ -52,9 +51,6 @@ export async function startTelemetry(meta: TaskMeta, backendUrl: string): Promis
 
 const REMOTE_ANSWER = '(remote run: no user available - proceed autonomously, but never take irreversible actions like paying, submitting orders, deleting, or posting)';
 
-// a remote run has no prompt() to block on: park the question in the backend
-// (the panel polls for pending questions and prompts the user), wait up to
-// ASK_WAIT_MS for the answer, then fall back to the autonomous default
 const ASK_WAIT_MS = 120_000;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -72,14 +68,11 @@ function makeRemoteAsk(taskId: number, backendUrl: string): (question: string) =
         if (answer !== null && answer !== undefined) return answer;
       }
     } catch {
-      // unreachable backend - proceed autonomously
     }
     return REMOTE_ANSWER;
   };
 }
 
-// remote runs have no panel: ask_user parks the question in the backend and
-// waits briefly for the user's answer before proceeding autonomously
 export async function runRemoteTask(
   taskId: number,
   taskText: string,
@@ -102,7 +95,6 @@ export async function runRemoteTask(
       effort: deps.provider.thinking ?? 'off',
     });
   } catch {
-    // start marker is best-effort
   }
 
   let result: Awaited<ReturnType<typeof runTask>> | null = null;
@@ -121,8 +113,6 @@ export async function runRemoteTask(
       telemetry,
     });
   } catch (error) {
-    // a crashed loop must not leave the row running forever - the reaper
-    // would only resurrect it after a minute; fail it now with the reason
     const reason = `crashed: ${error instanceof Error ? error.message : String(error)}`;
     await telemetry.finish('failed', undefined, reason, 0);
     return;
@@ -135,7 +125,6 @@ export function attachTelemetry(taskId: number, backendUrl: string): TaskTelemet
     try {
       await post(`${backendUrl}/tasks/${taskId}/events`, event);
     } catch {
-      // dropped events are acceptable; debugging is best-effort
     }
   };
 
@@ -149,7 +138,6 @@ export function attachTelemetry(taskId: number, backendUrl: string): TaskTelemet
       try {
         await post(`${backendUrl}/tasks/${taskId}/finish`, { status, summary, reason, stepCount });
       } catch {
-        // ignore
       }
     },
   };

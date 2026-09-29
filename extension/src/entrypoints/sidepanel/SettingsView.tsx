@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { chatCompletion } from '@/core/llm/chatClient';
+import { Chevron, Collapse } from './common/ui';
 import { allProducts, type Effort, type ProductId } from '@/core/llm/products';
 import type { LlmProvider, ProductStore, StoredProductConfig } from '@/core/llm/providers';
 import { syncConfigToBackend } from '@/core/llm/providers';
@@ -47,22 +48,6 @@ async function runTest(provider: LlmProvider): Promise<string> {
   return call ? `tool call ok: ${call.name}(${JSON.stringify(call.args)})` : `connected, but no tool call: ${res.content.slice(0, 80)}`;
 }
 
-export function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
-  return (
-    <div className={open ? 'card-body open' : 'card-body'}>
-      <div>{children}</div>
-    </div>
-  );
-}
-
-export function Chevron({ open }: { open: boolean }) {
-  return (
-    <svg className={open ? 'chevron open' : 'chevron'} width="12" height="12" viewBox="0 0 16 16" aria-hidden>
-      <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 function Switch({ checked, onChange, label }: { checked: boolean; onChange: (next: boolean) => void; label: string }) {
   return (
     <label className="switch">
@@ -99,7 +84,6 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
           setWsRoot(status.root);
         }
       } catch {
-        // backend down - toggle will show its own error on click
       }
     })();
   }, [refresh]);
@@ -114,7 +98,6 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
       }
       return next;
     });
-    // first load: only the active product starts expanded
     if (!openedActive.current) {
       const active = configs.find((c) => c.active);
       if (active) {
@@ -156,11 +139,9 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
         ...(product.efforts ? { thinking: card.thinking } : {}),
         ...(productId === 'openai' && card.reasoningEffort ? { reasoningEffort: card.reasoningEffort } : {}),
       });
-      // write-through: the backend db is the canonical provider store
       try {
         await syncConfigToBackend(await getBackendUrl(), { ...saved, activate: saved.active });
       } catch {
-        // offline - chrome.storage cache still holds it; db syncs on next save
       }
       setTestState({ productId, ok: true, message: 'saved' });
       dirty.current.delete(productId);
@@ -295,11 +276,9 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
                     disabled={!config}
                     onClick={async () => {
                       await store.activate(product.id);
-                      // write-through: the backend db is the canonical provider store
                       try {
                         await syncConfigToBackend(await getBackendUrl(), { ...(config as StoredProductConfig), activate: true });
                       } catch {
-                        // offline - local activation stands; db follows on next save
                       }
                       setOpen((prev) => ({ ...prev, [product.id]: true }));
                       await refresh();

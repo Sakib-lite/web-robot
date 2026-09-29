@@ -1,5 +1,3 @@
-// LocalPlane: the agent's local hands. The loop only ever sees this interface;
-// the transport (backend http today, native messaging later) is swappable.
 
 export interface DirEntry {
   name: string;
@@ -27,8 +25,6 @@ export interface WorkspaceInfo {
   root: string;
 }
 
-// carries the backend's machine-readable code (EXISTS, DENIED, …) so the loop
-// can branch on it without parsing messages
 export class PlaneError extends Error {
   constructor(
     message: string,

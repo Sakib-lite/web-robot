@@ -84,7 +84,6 @@ describe('runTask', () => {
     const result = await runTask('do the thing', deps({ chat }));
     expect(result.status).toBe('failed');
     expect(result.reason).toContain('model stopped calling tools');
-    // 3 no-tool turns + 1 re-investigation verdict (which also returns no tool)
     expect(chat).toHaveBeenCalledTimes(4);
 
     const empty = vi.fn().mockResolvedValue(reply(''));
@@ -165,7 +164,6 @@ describe('runTask', () => {
 
     expect(result.status).toBe('done');
     expect(result.summary).toContain('moved on');
-    // executed 4 times (hits 1-4), blocked from the 5th identical attempt on
     expect(act).toHaveBeenCalledTimes(4);
     const blockedSteps = result.steps.filter((s) => !s.ok && s.detail.includes('blocked'));
     expect(blockedSteps.length).toBeGreaterThanOrEqual(2);
@@ -229,7 +227,6 @@ describe('runTask', () => {
 
     expect(result.status).toBe('failed');
     expect(result.reason).toContain('stalled');
-    // executions stop after the block threshold (4 executed), the rest blocked
     expect(act.mock.calls.filter((c) => (c[0] as Action).type === 'goto' || (c[0] as Action).type === 'new_tab').length).toBe(4);
   });
 
@@ -602,7 +599,6 @@ describe('P2: plan + re-investigation + resume', () => {
     expect(plane.files.has('notes.md')).toBe(false);
     expect(plane.files.get('.web-robot/tasks/5/notes.md')).toBe('xz');
     expect(plane.files.has('skills/my-skill/SKILL.md')).toBe(true);
-    // the resolved location is echoed so the model uses real paths from turn one
     expect(result.steps[0]!.detail).toContain('created .web-robot/tasks/5/notes.md');
   });
 
@@ -618,7 +614,6 @@ describe('P2: plan + re-investigation + resume', () => {
     expect(result.summary).toContain('**Files:**');
     expect(result.summary).toContain('`/tmp/robots/.web-robot/tasks/9/report.md`');
     expect(result.summary).not.toContain('PLAN.md');
-    // no files touched → no Files section
     const plain = await runTask('nothing saved', wsDeps({ chat: vi.fn().mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'done' })])), plane: fakePlane() }, 10));
     expect(plain.summary).not.toContain('**Files:**');
   });
@@ -718,7 +713,6 @@ describe('P4: tab ownership', () => {
 
     expect(result.status).toBe('done');
     expect(opened).toHaveLength(7);
-    // tab 100 (oldest) closed once by the budget rule + all remaining owned tabs at cleanup
     expect(closed[0]).toBe(100);
     expect(new Set(closed).size).toBe(closed.length); // no double closes
     expect(closed.length).toBe(7); // 1 budget eviction + 6 owned at end

@@ -23,7 +23,6 @@ describe('systemPrompt', () => {
     expect(prompt).toContain('scoped failure');
     expect(prompt).toContain('partial result');
     expect(prompt).toContain('reworded');
-    // the phd.com lesson: totality must be proven, never assumed
     expect(prompt).toContain('COMPLETENESS');
     expect(prompt).toContain('Never claim complete coverage you have not verified');
   });
@@ -34,7 +33,6 @@ describe('systemPrompt', () => {
     expect(prompt).toContain('every file you create');
     expect(prompt).toContain('TOP LEVEL of your task folder');
     expect(prompt).toContain('scratch/ in your task folder');
-    // without a task folder the old workspace-root conventions stay
     const rootPrompt = systemPrompt('/tmp/robots');
     expect(rootPrompt).not.toContain("THIS TASK'S FOLDER");
     expect(rootPrompt).toContain('<topic>-<date>/" folder');

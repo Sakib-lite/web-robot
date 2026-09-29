@@ -12,7 +12,6 @@ export type AgentCall =
   | { kind: 'done'; summary: string; data?: unknown }
   | { kind: 'fail'; reason: string };
 
-// the local workspace tools - present only when a LocalPlane is wired in
 export type LocalCall =
   | { op: 'list_dir'; path?: string }
   | { op: 'read_file'; path: string; offset?: number; limit?: number }

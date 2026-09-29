@@ -13,10 +13,8 @@ export interface Snapshot {
   url: string;
   title: string;
   text: string;
-  /** raw page text was longer than the cap */
   textTruncated?: boolean;
   elements: ElementInfo[];
-  /** more interactive elements exist beyond the snapshot cap */
   elementsTruncated?: boolean;
 }
 

@@ -143,7 +143,6 @@ describe('truncation + thin-main fallback (the phd.com lesson)', () => {
       </aside>
     `);
     const snap = buildSnapshot(document);
-    // the list content and the count badge must be visible to the agent
     expect(snap.text).toContain('ISTA');
     expect(snap.text).toContain('36 new');
   });

@@ -49,8 +49,6 @@ async function runBrowserAction(tab: chrome.tabs.Tab | undefined, action: Action
       if (!tab?.id) return { ok: false, error: 'no active tab to navigate' };
       const url = navigableUrl(action.url);
       if (!url) return { ok: false, error: `not a navigable url: ${action.url}` };
-      // re-navigating the tab to where it already is is a wasted load + sleep;
-      // agents double-fire goto right after opening a tab
       if (tab.url === url) return { ok: true, detail: `already at ${url}` };
       await tabsApi.update(tab.id, { url });
       await sleep(600);
@@ -59,8 +57,6 @@ async function runBrowserAction(tab: chrome.tabs.Tab | undefined, action: Action
     case 'new_tab': {
       const url = action.url ? navigableUrl(action.url) : 'about:blank';
       if (!url) return { ok: false, error: `not a navigable url: ${action.url}` };
-      // reuse an existing tab already at this url instead of stacking
-      // duplicates - agents open the same page repeatedly without this
       const existing = ((await tabsApi.query({})) ?? []).find((t) => t.url === url && typeof t.id === 'number');
       if (existing?.id !== undefined) {
         await tabsApi.update(existing.id, { active: true });
@@ -101,8 +97,6 @@ export async function handleMessage(message: PanelRequest, apis: BrowserApis): P
 
   if (message.type === 'GET_TABS') {
     const all = (await tabsApi.query({})) ?? [];
-    // star only the focused window's active tab - one star total, or the
-    // model cannot tell which of several windows it is driving
     const [focused] = await tabsApi.query({ active: true, lastFocusedWindow: true });
     const tabs = all
       .filter((t) => (t.url ?? '').startsWith('http') && typeof t.id === 'number')

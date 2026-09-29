@@ -14,6 +14,5 @@ export default defineBackground(() => {
       if (alarm.name === 'web-robot-remote-poll') void maybeRunRemoteWork(deps);
     });
   } catch {
-    // alarms is a wake-up optimization only; the interval covers the rest
   }
 });

@@ -9,12 +9,9 @@ export default function App() {
   const [view, setView] = useState<'task' | 'settings'>('task');
   const { store, configs, refresh } = useProviders();
   const [remoteState, setRemoteState] = useState('idle');
-  // null = healthy: no footer line at all. only real problems get surfaced,
-  // and the value is set once per cycle so a healthy poll never re-renders
   const [backendError, setBackendError] = useState<string | null>(null);
   const [manualRun, setManualRun] = useState<RunState | null>(null);
   const baseDeps = useRef(panelRemoteDeps());
-  // last question id already prompted - a dismissed prompt must not nag
   const promptedAsk = useRef<number | null>(null);
 
   useEffect(() => {
@@ -25,16 +22,12 @@ export default function App() {
       let error: string | null = null;
       try {
         url = await getBackendUrl();
-        // /control/reload is consume-once (the worker's reload handshake) -
-        // the health check must never eat that flag, so probe the queue instead
         const res = await fetch(`${url}/queue/depth`, { signal: AbortSignal.timeout(4000) });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
       } catch (error_) {
         error = `backend unreachable · ${url} · ${error_ instanceof Error ? error_.message : String(error_)}`;
       }
 
-      // mid-run clarification: a running task parked a question - prompt here
-      // so the run's ask_user wait gets a real human answer
       if (!error) {
         try {
           const res = await fetch(`${url}/asks/pending`, { signal: AbortSignal.timeout(4000) });
@@ -53,7 +46,6 @@ export default function App() {
             }
           }
         } catch {
-          // asking is best-effort
         }
       }
 
@@ -69,8 +61,6 @@ export default function App() {
       if (!cancelled) setBackendError((prev) => (prev === error ? prev : error));
     }
 
-    // a throttled (hidden) panel wakes with stale status - refresh the moment
-    // the page becomes visible again instead of waiting out the interval
     const onVisible = () => {
       if (document.visibilityState === 'visible') void poll();
     };

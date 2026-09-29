@@ -87,7 +87,6 @@ describe('db-backed provider resolution', () => {
     const fetchFn = backendResponder({ product: 'glm', apiKey: 'dbkey', baseUrl: 'https://api.z.ai/api/coding/paas/v4', model: 'GLM-5.3-Flash', effort: 'low' });
     const resolved = await resolveActiveProvider(store, null, { url: 'http://backend.test', fetchFn });
     expect(resolved).toMatchObject({ productId: 'glm', apiKey: 'dbkey', model: 'GLM-5.3-Flash', thinking: 'low' });
-    // mirror makes the cache match the db (fire-and-forget - let it land)
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(await store.get('glm')).toMatchObject({ apiKey: 'dbkey', model: 'GLM-5.3-Flash' });
     expect((await store.get('glm'))?.active).toBe(true);

@@ -87,9 +87,6 @@ export function taskContext(
 
 export function observationBlock(tabs: TabInfo[], snapshot: Snapshot | null, owned: Record<number, string> = {}): string {
   if (!snapshot) return 'CURRENT PAGE:\n(no accessible page - open one with goto or new_tab)';
-  // a single star on the tab being driven (matched by url) - multiple stars
-  // across windows confuse which page actions affect; (agent) marks tabs this
-  // task opened (they close automatically when the task ends)
   const tabLines = tabs.map((t) => {
     const driven = t.url === snapshot.url ? '*' : ' ';
     const ownedMark = owned[t.id] !== undefined ? ' (agent)' : '';

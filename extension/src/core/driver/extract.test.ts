@@ -27,7 +27,6 @@ describe('extractForGoal', () => {
     const result = extractForGoal(document, 'What is the PTE Academic minimum score for admission?');
     expect(result).toContain('MATCHING TEXT');
     expect(result).toContain('Pearson Test of English (PTE Academic) with a minimum score of 55');
-    // context lines around the match are included
     expect(result).toContain('IELTS score of 6.5');
   });
 
