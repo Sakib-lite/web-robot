@@ -1,29 +1,9 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
+import { DENY_PATTERNS, EXEC_DEFAULT_TIMEOUT_MS, EXEC_MAX_TIMEOUT_MS, EXEC_OUTPUT_CAP, MAX_EDIT_OLD_CHARS, MAX_LIST_ENTRIES, MAX_WRITE_CHARS, READ_DEFAULT_LIMIT, READ_LINE_TRUNCATE, READ_MAX_FILE_BYTES, READ_MAX_LIMIT } from './workspace.constants';
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import * as fs from 'node:fs/promises';
-
-export const READ_DEFAULT_LIMIT = 300;
-export const READ_MAX_LIMIT = 1000;
-const READ_LINE_TRUNCATE = 500;
-const READ_MAX_FILE_BYTES = 10 * 1024 * 1024;
-const MAX_WRITE_CHARS = 100 * 1024;
-const MAX_EDIT_OLD_CHARS = 2 * 1024;
-const MAX_LIST_ENTRIES = 200;
-const EXEC_DEFAULT_TIMEOUT_MS = 120_000;
-const EXEC_MAX_TIMEOUT_MS = 600_000;
-const EXEC_OUTPUT_CAP = 8 * 1024;
-
-const DENY_PATTERNS: Array<[RegExp, string]> = [
-  [/\bsudo\b/, 'sudo'],
-  [/\bosascript\b/, 'osascript'],
-  [/\.ssh\b/, '~/.ssh access'],
-  [/\b(curl|wget)\b[^|;&]*\|\s*(sudo\s+)?(ba|z|da)?sh\b/, 'piping a download into a shell'],
-  [/\brm\s+[^;|&]*-(\w*r\w*f|\w*f\w*r)\w*\s+(\/|~|\$HOME)(\s|['"]|$)/, 'rm -rf on an absolute or home path'],
-  [/\bchmod\s+-R\s+777\s+\/(\s|$)/, 'chmod -R 777 /'],
-  [/\b(shutdown|reboot|halt)\b/, 'shutdown/reboot'],
-];
 
 export type WorkspaceErrorCode =
   | 'ESCAPE'

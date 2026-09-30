@@ -1,5 +1,8 @@
 import { Body, Controller, ForbiddenException, Get, HttpException, HttpStatus, Injectable, Param, Post } from '@nestjs/common';
 import { WorkspaceError, WorkspaceService } from './workspace.service';
+import { FsAppendDto, FsEditDto, FsListDto, FsPathDto, FsReadDto, FsWriteDto } from './dto/fs.dto';
+import { ExecDto } from './dto/exec.dto';
+import { WorkspaceControlDto } from './dto/workspace-control.dto';
 
 const STATUS_BY_CODE: Record<string, HttpStatus> = {
   ESCAPE: HttpStatus.FORBIDDEN,
@@ -30,7 +33,7 @@ export class WorkspaceController {
   }
 
   @Post('workspace/control')
-  control(@Body() body: { enabled: boolean }) {
+  control(@Body() body: WorkspaceControlDto) {
     if (typeof body.enabled !== 'boolean') throw new HttpException('enabled (boolean) is required', HttpStatus.BAD_REQUEST);
     this.workspace.setEnabled(body.enabled);
     return { enabled: body.enabled };
@@ -65,42 +68,42 @@ export class WorkspaceController {
   }
 
   @Post('fs/list')
-  async list(@Body() body: { path?: string }) {
+  async list(@Body() body: FsListDto) {
     return this.guarded(() => this.workspace.list(body.path ?? '.'));
   }
 
   @Post('fs/read')
-  async read(@Body() body: { path: string; offset?: number; limit?: number }) {
+  async read(@Body() body: FsReadDto) {
     return this.guarded(() => this.workspace.read(body.path, body.offset ?? 1, body.limit ?? 300));
   }
 
   @Post('fs/write')
-  async write(@Body() body: { path: string; content: string; onlyIfNew?: boolean }) {
+  async write(@Body() body: FsWriteDto) {
     return this.guarded(() => this.workspace.write(body.path, body.content ?? '', body.onlyIfNew === true));
   }
 
   @Post('fs/edit')
-  async edit(@Body() body: { path: string; oldString: string; newString: string; replaceAll?: boolean }) {
+  async edit(@Body() body: FsEditDto) {
     return this.guarded(() => this.workspace.edit(body.path, body.oldString, body.newString, body.replaceAll === true));
   }
 
   @Post('fs/append')
-  async append(@Body() body: { path: string; text: string }) {
+  async append(@Body() body: FsAppendDto) {
     return this.guarded(() => this.workspace.append(body.path, body.text ?? ''));
   }
 
   @Post('fs/delete')
-  async delete(@Body() body: { path: string }) {
+  async delete(@Body() body: FsPathDto) {
     return this.guarded(() => this.workspace.delete(body.path));
   }
 
   @Post('fs/mkdir')
-  async mkdir(@Body() body: { path: string }) {
+  async mkdir(@Body() body: FsPathDto) {
     return this.guarded(() => this.workspace.mkdir(body.path));
   }
 
   @Post('exec')
-  async exec(@Body() body: { cmd: string; timeoutMs?: number; cwd?: string }) {
+  async exec(@Body() body: ExecDto) {
     return this.guarded(() => this.workspace.exec(body.cmd, body.timeoutMs, body.cwd));
   }
 

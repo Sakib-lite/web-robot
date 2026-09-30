@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
 import { ProvidersService } from './providers.service';
+import { UpsertProviderDto } from './dto/upsert-provider.dto';
 
 @Controller()
 export class ProvidersController {
@@ -16,7 +17,7 @@ export class ProvidersController {
   }
 
   @Put('providers/:product')
-  upsert(@Param('product') product: string, @Body() body: { apiKey?: string; baseUrl?: string; model?: string; effort?: string }) {
+  upsert(@Param('product') product: string, @Body() body: UpsertProviderDto) {
     const fields = Object.fromEntries(Object.entries(body ?? {}).filter(([, v]) => typeof v === 'string' && v.trim() !== ''));
     return this.providers.upsert(product, fields);
   }

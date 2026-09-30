@@ -1,16 +1,6 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
+import { ClaimedTask } from './dto/claimed-task.dto';
 import { DbService } from '../common/db.service';
-
-export interface ClaimedTask {
-  taskId: number;
-  taskText: string;
-  skill?: string;
-  model?: string;
-  effort?: string;
-  context?: string;
-  steps?: string[];
-  lastMessage?: string;
-}
 
 @Injectable()
 export class QueueService implements OnModuleInit {

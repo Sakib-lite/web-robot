@@ -1,5 +1,9 @@
 import { Body, Controller, Get, Logger, NotFoundException, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
 import { QueueService } from './queue.service';
+import { EnqueueTaskDto } from './dto/enqueue-task.dto';
+import { StartTaskDto } from './dto/start-task.dto';
+import { ContinueTaskDto } from './dto/continue-task.dto';
+import { WorkerControlDto, WorkerStatusDto } from './dto/worker.dto';
 
 @Controller()
 export class QueueController {
@@ -8,7 +12,7 @@ export class QueueController {
   constructor(private readonly queue: QueueService) {}
 
   @Post('queue')
-  enqueue(@Body() body: { taskText: string; skill?: string; model?: string; effort?: string; context?: string; steps?: string[] }) {
+  enqueue(@Body() body: EnqueueTaskDto) {
     if (!body.taskText?.trim()) throw new Error('taskText is required');
     const steps = Array.isArray(body.steps) ? body.steps.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim()) : undefined;
     return this.queue.enqueue(
@@ -46,7 +50,7 @@ export class QueueController {
   }
 
   @Post('tasks/:id/start')
-  start(@Param('id', ParseIntPipe) id: number, @Body() body: { product?: string; model?: string; effort?: string }) {
+  start(@Param('id', ParseIntPipe) id: number, @Body() body: StartTaskDto) {
     return this.queue.markRunning(id, body);
   }
 
@@ -59,7 +63,7 @@ export class QueueController {
   }
 
   @Post('tasks/:id/continue')
-  async continueTask(@Param('id', ParseIntPipe) id: number, @Body() body: { message: string }) {
+  async continueTask(@Param('id', ParseIntPipe) id: number, @Body() body: ContinueTaskDto) {
     const res = await this.queue.continueTask(id, body?.message ?? '');
     if (!res.queued) throw new NotFoundException(`task ${id} not found or still queued/running`);
     this.logger.log(`CONTINUE queued: ${id}`);
@@ -90,14 +94,14 @@ export class QueueController {
   }
 
   @Post('worker/control')
-  workerControl(@Body() body: { enabled: boolean }) {
+  workerControl(@Body() body: WorkerControlDto) {
     if (typeof body.enabled !== 'boolean') throw new Error('enabled (boolean) is required');
     this.queue.requestWorkerControl(body.enabled);
     return { pending: true, enabled: body.enabled };
   }
 
   @Post('worker/status')
-  workerStatus(@Body() body: { source: string; state: string; currentTask?: number }) {
+  workerStatus(@Body() body: WorkerStatusDto) {
     if (!body.source || !body.state) throw new Error('source and state are required');
     this.queue.reportWorkerStatus(body.source, body.state, body.currentTask);
     return { ok: true };

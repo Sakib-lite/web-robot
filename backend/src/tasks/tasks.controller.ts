@@ -1,25 +1,10 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
 import { TasksService } from './tasks.service';
-
-interface CreateTaskDto {
-  taskText: string;
-  product?: string;
-  model?: string;
-  effort?: string;
-}
-
-interface EventDto {
-  type: 'observation' | 'llm_call' | 'action' | 'user_answer';
-  step: number;
-  data: Record<string, unknown>;
-}
-
-interface FinishTaskDto {
-  status: 'done' | 'failed' | 'stopped' | 'running';
-  summary?: string;
-  reason?: string;
-  stepCount: number;
-}
+import { CreateTaskDto } from './dto/create-task.dto';
+import { TaskEventDto } from './dto/task-event.dto';
+import { FinishTaskDto } from './dto/finish-task.dto';
+import { AskQuestionDto } from './dto/ask-question.dto';
+import { AnswerQuestionDto } from './dto/answer-question.dto';
 
 @Controller()
 export class TasksController {
@@ -31,7 +16,7 @@ export class TasksController {
   }
 
   @Post('tasks/:id/events')
-  async addEvent(@Param('id', ParseIntPipe) id: number, @Body() body: EventDto) {
+  async addEvent(@Param('id', ParseIntPipe) id: number, @Body() body: TaskEventDto) {
     switch (body.type) {
       case 'observation':
         await this.tasks.addObservation(id, body.step, body.data as never);
@@ -67,7 +52,7 @@ export class TasksController {
   }
 
   @Post('tasks/:id/ask')
-  ask(@Param('id', ParseIntPipe) id: number, @Body() body: { step: number; question: string }) {
+  ask(@Param('id', ParseIntPipe) id: number, @Body() body: AskQuestionDto) {
     if (!body?.question?.trim()) throw new Error('question is required');
     return this.tasks.ask(id, body.step ?? 0, body.question.trim());
   }
@@ -78,7 +63,7 @@ export class TasksController {
   }
 
   @Post('asks/:id/answer')
-  answerAsk(@Param('id', ParseIntPipe) id: number, @Body() body: { answer: string }) {
+  answerAsk(@Param('id', ParseIntPipe) id: number, @Body() body: AnswerQuestionDto) {
     if (!body?.answer?.trim()) throw new Error('answer is required');
     return this.tasks.answer(id, body.answer.trim());
   }
