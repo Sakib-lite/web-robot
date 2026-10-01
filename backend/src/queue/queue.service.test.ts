@@ -1,49 +1,78 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { QueueService } from './queue.service';
+
+type Run = (sql: string, params?: unknown[]) => Promise<any>;
 
 function queueService(adopted: Array<{ id: number; task_text: string }> = [], insertIds: number[] = []) {
   const queries: Array<[string, unknown[]]> = [];
+  const saves: Array<{ entity: unknown; dto: unknown }> = [];
   const texts = new Map<number, string>();
+  const stepsByTask = new Map<number, string[] | null>();
   let adoptCalls = 0;
   let insertCalls = 0;
-  let lastSteps: string[] | null = null;
-  const run = async (sql: string, params?: unknown[]) => {
-    queries.push([sql, params ?? []]);
+
+  const run: Run = async (sql: string, params: unknown[] = []) => {
+    queries.push([sql, params]);
     if (sql.includes('FOR UPDATE SKIP LOCKED')) {
       const row = adopted[adoptCalls++];
-      return { rows: row ? [row] : [] };
+      return row ? [row] : [];
     }
-    if (sql.includes(`VALUES ($1, $2, $3, $4, $5, $6, 'queued')`)) {
-      insertCalls += 1;
-      const id = insertIds[insertCalls - 1] ?? insertCalls;
-      texts.set(id, String(params?.[0] ?? ''));
-      const rawSteps = params?.[5];
-      lastSteps = typeof rawSteps === 'string' ? (JSON.parse(rawSteps) as string[]) : Array.isArray(rawSteps) ? (rawSteps as string[]) : null;
-      return { rows: [{ id }] };
-    }
-
     if (sql.includes(`SET status='starting' WHERE id`)) {
       const id = Number(params?.[0]);
-      return { rows: [{ task_text: texts.get(id) ?? '', skill: null, ...(lastSteps ? { steps: lastSteps } : {}) }], rowCount: id === -1 ? 0 : 1 };
+      return [
+        {
+          task_text: texts.get(id) ?? '',
+          skill: null,
+          steps: stepsByTask.get(id) ?? null,
+        },
+      ];
     }
-    return { rows: [{ id: queries.length }] };
+    if (sql.includes(`SET status='queued', attempts=0`)) {
+      return { rowCount: params?.[0] === 9 ? 0 : 1 };
+    }
+    return [{ id: queries.length }];
   };
 
-  const client = { query: run, release: () => {} };
-  const service = new QueueService({
-    pool: { query: run, connect: async () => client },
-  } as never);
-  return { service, queries };
+  const em = {
+    query: run,
+    save: async (entity: unknown, dto: any) => {
+      saves.push({ entity, dto });
+      if (dto?.status === 'queued') {
+        insertCalls += 1;
+        const id = insertIds[insertCalls - 1] ?? insertCalls;
+        texts.set(id, dto.taskText);
+        stepsByTask.set(id, dto.steps ?? null);
+        return { id, ...dto };
+      }
+      return { id: 500, ...dto };
+    },
+    update: async () => ({ affected: 1 }),
+  };
+  const dataSource = {
+    query: run,
+    transaction: async (cb: (em: unknown) => Promise<unknown>) => cb(em),
+  };
+  const tasks = {
+    findOneBy: async (where: { id: number }) => ({ id: where.id, taskText: texts.get(where.id) ?? '', status: 'failed' }),
+    update: async () => ({ affected: 1 }),
+  };
+  const service = new QueueService(tasks as never, { save: async (m: unknown) => m } as never, dataSource as never);
+  return { service, queries, saves, texts };
+}
+
+function bareService(run: Run, tasks: unknown = {}) {
+  const em = { query: run, save: async (_e: unknown, dto: unknown) => ({ id: -1, ...dto }), update: async () => ({ affected: 1 }) };
+  const dataSource = { query: run, transaction: async (cb: (em: unknown) => Promise<unknown>) => cb(em) };
+  return new QueueService(tasks as never, {} as never, dataSource as never);
 }
 
 describe('QueueService', () => {
-  it('enqueue creates a queued task row, records its first message, and returns its id', async () => {
-    const { service, queries } = queueService();
+  it('enqueue saves a queued task and records its first chat message', async () => {
+    const { service, saves } = queueService();
     const res = await service.enqueue('list repos');
     expect(res.taskId).toBe(1);
-    expect(queries.some(([sql]) => sql.includes(`VALUES ($1, $2, $3, $4, $5, $6, 'queued')`))).toBe(true);
-
-    expect(queries.some(([sql, params]) => sql.includes('INSERT INTO task_messages') && params?.[0] === 1)).toBe(true);
+    expect(saves[0]!.dto).toMatchObject({ taskText: 'list repos', status: 'queued' });
+    expect(saves[1]!.dto).toMatchObject({ role: 'user', content: 'list repos' });
     expect(service.depth()).toBe(1);
   });
 
@@ -64,15 +93,22 @@ describe('QueueService', () => {
     const claimed = await service.next();
     expect(claimed).toMatchObject({ taskText: 'race' });
     const flip = queries.find(([sql]) => sql.includes(`SET status='starting' WHERE id`));
-    expect(flip).toBeDefined();
     expect(flip![1]).toEqual([1]);
   });
 
-  it('a memory claim that lost the db race (rowCount 0) returns null instead of the task', async () => {
-    const { service } = queueService([], [-1]);
+  it('a memory claim that lost the db race returns null instead of the task', async () => {
+    const run = vi.fn(async (sql: string) => (sql.includes(`SET status='starting' WHERE id`) ? [] : []));
+    const service = bareService(run);
     await service.enqueue('taken');
     expect(await service.next()).toBeNull();
     expect(service.depth()).toBe(0);
+  });
+
+  it('enqueue carries steps and the claim hands them back', async () => {
+    const { service } = queueService();
+    await service.enqueue('two-step job', undefined, undefined, undefined, undefined, ['step one', 'step two']);
+    const claimed = await service.next();
+    expect(claimed).toMatchObject({ steps: ['step one', 'step two'] });
   });
 
   it('reload flag is consume-once', () => {
@@ -95,14 +131,13 @@ describe('QueueService single-flight + reaper + retry', () => {
   it('allows claims again once the busy heartbeat is stale', async () => {
     const { service } = queueService();
     service.reportWorkerStatus('sw', 'busy', 999);
-
     (service as unknown as { workerStatuses: Map<string, { state: string; currentTask?: number; ts: number }> })
       .workerStatuses.get('sw')!.ts = Date.now() - 30_000;
     await service.enqueue('a');
     expect(await service.next('panel')).toMatchObject({ taskText: 'a' });
   });
 
-  it('a claim marks that source busy with the task id (single-flight from the instant of claim)', async () => {
+  it('a claim marks that source busy with the task id', async () => {
     const { service } = queueService();
     await service.enqueue('a');
     await service.next('sw');
@@ -112,85 +147,52 @@ describe('QueueService single-flight + reaper + retry', () => {
   });
 
   it('reaper requeues a dead running task on the second sweep and fails it at 3 attempts', async () => {
-    const pool = {
-      query: async (sql: string, params?: unknown[]) => {
-        if (sql.includes(`WHERE status IN ('running', 'starting')`)) {
-          return { rows: [{ id: 201, attempts: 0 }] };
-        }
-        if (sql.includes(`SET status='queued', attempts=$2`)) {
-          return { rows: [{ id: params?.[0] }] };
-        }
-        if (sql.includes(`SET status='failed'`)) {
-          return { rows: [{ id: params?.[0] }] };
-        }
-        return { rows: [] };
-      },
-    };
-    const service = new QueueService({ pool } as never);
-
+    const run = vi.fn(async (sql: string) => {
+      if (sql.includes(`WHERE status IN ('running', 'starting')`)) return [{ id: 201, attempts: 0 }];
+      return [];
+    });
+    const service = bareService(run);
     expect(await service.reapStaleRuns()).toEqual({ requeued: [], failed: [] });
-
     (service as unknown as { missingSince: Map<number, number> }).missingSince.set(201, Date.now() - 60_000);
     expect(await service.reapStaleRuns()).toEqual({ requeued: [201], failed: [] });
 
-    service.reportWorkerStatus('panel', 'busy', 202);
-    (service as unknown as { workerStatuses: Map<string, { currentTask?: number; ts: number }> })
-      .workerStatuses.get('panel')!.currentTask = 202;
-    const alivePool = {
-      query: async (sql: string) => {
-        if (sql.includes(`WHERE status IN ('running', 'starting')`)) return { rows: [{ id: 202, attempts: 0 }] };
-        return { rows: [] };
-      },
-    };
-    const service2 = new QueueService({ pool: alivePool } as never);
+    const aliveRun = vi.fn(async (sql: string) => (sql.includes(`WHERE status IN ('running', 'starting')`) ? [{ id: 202, attempts: 0 }] : []));
+    const service2 = bareService(aliveRun);
     service2.reportWorkerStatus('panel', 'busy', 202);
     expect(await service2.reapStaleRuns()).toEqual({ requeued: [], failed: [] });
     expect(await service2.reapStaleRuns()).toEqual({ requeued: [], failed: [] });
   });
 
   it('retry requeues a failed task and refuses non-failed ones', async () => {
-    const { service } = queueService();
-    const pool2 = {
-      query: async (sql: string) => {
-        if (sql.includes(`status IN ('failed', 'stopped')`)) return { rows: [{ task_text: 'try me again' }] };
-        return { rows: [] };
-      },
-    };
-    const svc = new QueueService({ pool: pool2 } as never);
+    const ok = { findOneBy: async () => ({ id: 1, taskText: 'try me again', status: 'failed' }), update: async () => ({ affected: 1 }) };
+    const svc = bareService(vi.fn(async () => []), ok);
     expect(await svc.retry(1)).toEqual({ queued: true });
-    const emptyPool = { query: async () => ({ rows: [] }) };
-    const svc2 = new QueueService({ pool: emptyPool } as never);
+    const bad = { findOneBy: async () => ({ id: 2, taskText: 'running', status: 'running' }), update: async () => ({ affected: 1 }) };
+    const svc2 = bareService(vi.fn(async () => []), bad);
     expect(await svc2.retry(2)).toEqual({ queued: false });
-    void service;
   });
 });
 
-describe('QueueService continue + steps', () => {
+describe('QueueService continue + kill', () => {
   it('continueTask requeues a finished task with its message recorded', async () => {
-    const { service, queries } = queueService();
+    const { service, queries, saves } = queueService();
     const res = await service.continueTask(5, 'check docker containers');
     expect(res).toEqual({ queued: true });
-    expect(queries.some(([sql]) => sql.includes(`status='queued', attempts=0, finished_at=NULL`))).toBe(true);
-    expect(queries.some(([sql, params]) => sql.includes('INSERT INTO task_messages') && params?.[0] === 5 && params?.[1] === 'check docker containers')).toBe(true);
+    expect(queries.some(([sql]) => sql.includes(`SET status='queued', attempts=0, finished_at=NULL`))).toBe(true);
+    expect(saves.at(-1)!.dto).toMatchObject({ taskId: 5, role: 'user', content: 'check docker containers' });
     expect(service.depth()).toBe(1);
   });
 
   it('continueTask refuses a task that is queued/starting/running', async () => {
-    const pool = {
-      connect: async () => ({
-        query: async (sql: string) => (sql.includes('UPDATE tasks') ? { rowCount: 0, rows: [] } : { rows: [] }),
-        release: () => {},
-      }),
-      query: async () => ({ rows: [] }),
-    };
-    const service = new QueueService({ pool } as never);
+    const run = vi.fn(async () => ({ rowCount: 0 }));
+    const service = bareService(run);
     expect(await service.continueTask(9, 'hi')).toEqual({ queued: false });
   });
 
-  it('enqueue carries steps and the claim hands them back with the last message', async () => {
-    const { service } = queueService();
-    await service.enqueue('two-step job', undefined, undefined, undefined, undefined, ['step one', 'step two']);
-    const claimed = await service.next('sw');
-    expect(claimed).toMatchObject({ steps: ['step one', 'step two'] });
+  it('kill marks a live task stopped and requests an extension reload', async () => {
+    const run = vi.fn(async () => ({ rowCount: 1 }));
+    const service = bareService(run);
+    expect(await service.kill(7)).toEqual({ stopped: true });
+    expect(service.consumeReload()).toBe(true);
   });
 });

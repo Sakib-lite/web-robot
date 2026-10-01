@@ -102,7 +102,7 @@ export class QueueController {
 
   @Post('worker/status')
   workerStatus(@Body() body: WorkerStatusDto) {
-    if (!body.source || !body.state) throw new Error('source and state are required');
+      if (!body.source || !body.state) throw new Error('source and state are required');
     this.queue.reportWorkerStatus(body.source, body.state, body.currentTask);
     return { ok: true };
   }

@@ -6,16 +6,16 @@ function trace(over: Partial<TaskTrace> = {}): TaskTrace {
   return {
     task: {
       id: 1,
-      task_text: 'list repos',
+      taskText: 'list repos',
       status: 'failed',
       summary: null,
       reason: 'loop detected',
       product: 'glm',
       model: 'glm-5.3',
       effort: 'off',
-      step_count: 3,
-      created_at: createdAt,
-      finished_at: new Date('2026-11-14T08:01:00Z'),
+      stepCount: 3,
+      createdAt: createdAt,
+      finishedAt: new Date('2026-11-14T08:01:00Z'),
     },
     observations: [],
     llmCalls: [],
@@ -42,10 +42,10 @@ describe('buildDebugReport', () => {
   it('orders the timeline by step then time', () => {
     const report = buildDebugReport(
       trace({
-        observations: [{ step: 2, url: 'https://x.dev', title: 'X', page_text: 'text', elements: [], tabs: [], created_at: new Date('2026-11-14T08:00:20Z') }],
-        llmCalls: [{ step: 2, messages: [], response_content: '', tool_calls: [], usage: {}, duration_ms: 500, error: null, created_at: new Date('2026-11-14T08:00:10Z') }],
-        actions: [{ step: 1, tool: 'goto', args: { url: 'https://x.dev' }, ok: true, detail: 'navigated', duration_ms: 700, created_at: new Date('2026-11-14T08:00:05Z') }],
-        userAnswers: [{ step: 3, question: 'which?', answer: 'that one', created_at: new Date('2026-11-14T08:00:30Z') }],
+        observations: [{ step: 2, url: 'https://x.dev', title: 'X', pageText: 'text', elements: [], tabs: [], createdAt: new Date('2026-11-14T08:00:20Z') }],
+        llmCalls: [{ step: 2, messages: [], responseContent: '', toolCalls: [], usage: {}, durationMs: 500, error: null, createdAt: new Date('2026-11-14T08:00:10Z') }],
+        actions: [{ step: 1, tool: 'goto', args: { url: 'https://x.dev' }, ok: true, detail: 'navigated', durationMs: 700, createdAt: new Date('2026-11-14T08:00:05Z') }],
+        userAnswers: [{ step: 3, question: 'which?', answer: 'that one', createdAt: new Date('2026-11-14T08:00:30Z') }],
       }),
     );
     expect(report.timeline.map((e) => `${e.step}:${e.type}`)).toEqual(['1:action', '2:llm_call', '2:observation', '3:user_answer']);
@@ -55,10 +55,10 @@ describe('buildDebugReport', () => {
     const report = buildDebugReport(
       trace({
         actions: [
-          { step: 1, tool: 'goto', args: {}, ok: true, detail: 'ok', duration_ms: 5, created_at: new Date() },
-          { step: 2, tool: 'click', args: { ref: 'e9' }, ok: false, detail: 'stale ref', duration_ms: 5, created_at: new Date() },
+          { step: 1, tool: 'goto', args: {}, ok: true, detail: 'ok', durationMs: 5, createdAt: new Date() },
+          { step: 2, tool: 'click', args: { ref: 'e9' }, ok: false, detail: 'stale ref', durationMs: 5, createdAt: new Date() },
         ],
-        llmCalls: [{ step: 3, messages: [], response_content: null, tool_calls: null, usage: null, duration_ms: null, error: 'llm request failed (429)', created_at: new Date() }],
+        llmCalls: [{ step: 3, messages: [], responseContent: null, toolCalls: null, usage: null, durationMs: null, error: 'llm request failed (429)', createdAt: new Date() }],
       }),
     );
     expect(report.failures).toEqual([

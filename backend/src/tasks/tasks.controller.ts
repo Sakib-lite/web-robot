@@ -74,7 +74,7 @@ export class TasksController {
   }
 
   @Get('tasks/:id/messages')
-  messages(@Param('id', ParseIntPipe) id: number) {
-    return { messages: this.tasks.listMessages(id) };
+  async messages(@Param("id", ParseIntPipe) id: number) {
+    return { messages: await this.tasks.listMessages(id) };
   }
 }

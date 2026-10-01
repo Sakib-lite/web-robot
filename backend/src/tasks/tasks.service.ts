@@ -1,143 +1,160 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { DbService } from '../common/db.service';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { buildDebugReport, type TaskTrace } from './tasks.debug.report';
+import { Action } from './entities/action.entity';
+import { LlmCall } from './entities/llm-call.entity';
+import { Observation } from './entities/observation.entity';
+import { Task } from './entities/task.entity';
+import { TaskMessage } from './entities/task-message.entity';
+import { UserAnswer } from './entities/user-answer.entity';
 
 @Injectable()
 export class TasksService {
-  constructor(private readonly db: DbService) {}
+  constructor(
+    @InjectRepository(Task) private readonly tasks: Repository<Task>,
+    @InjectRepository(Observation) private readonly observations: Repository<Observation>,
+    @InjectRepository(LlmCall) private readonly llmCalls: Repository<LlmCall>,
+    @InjectRepository(Action) private readonly actions: Repository<Action>,
+    @InjectRepository(UserAnswer) private readonly userAnswers: Repository<UserAnswer>,
+    @InjectRepository(TaskMessage) private readonly messages: Repository<TaskMessage>,
+  ) {}
 
   async createTask(input: { taskText: string; product?: string; model?: string; effort?: string }) {
-    const res = await this.db.pool.query(
-      `INSERT INTO tasks (task_text, product, model, effort) VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
-      [input.taskText, input.product ?? null, input.model ?? null, input.effort ?? null],
-    );
-    return { id: res.rows[0].id as number };
+    const task = await this.tasks.save({
+      taskText: input.taskText,
+      product: input.product ?? null,
+      model: input.model ?? null,
+      effort: input.effort ?? null,
+    });
+    return { id: task.id };
   }
 
   async addObservation(taskId: number, step: number, data: { url?: string; title?: string; pageText?: string; elements?: unknown; tabs?: unknown }) {
-    await this.db.pool.query(
-      `INSERT INTO observations (task_id, step, url, title, page_text, elements, tabs) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [taskId, step, data.url ?? null, data.title ?? null, data.pageText ?? null, JSON.stringify(data.elements ?? null), JSON.stringify(data.tabs ?? null)],
-    );
+    await this.observations.save({
+      taskId,
+      step,
+      url: data.url ?? null,
+      title: data.title ?? null,
+      pageText: data.pageText ?? null,
+      elements: data.elements ?? null,
+      tabs: data.tabs ?? null,
+    });
   }
 
   async addLlmCall(taskId: number, step: number, data: { messages: unknown; responseContent?: string; toolCalls?: unknown; usage?: unknown; durationMs?: number; error?: string }) {
-    await this.db.pool.query(
-      `INSERT INTO llm_calls (task_id, step, messages, response_content, tool_calls, usage, duration_ms, error) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [taskId, step, JSON.stringify(data.messages), data.responseContent ?? null, JSON.stringify(data.toolCalls ?? null), JSON.stringify(data.usage ?? null), data.durationMs ?? null, data.error ?? null],
-    );
+    await this.llmCalls.save({
+      taskId,
+      step,
+      messages: data.messages,
+      responseContent: data.responseContent ?? null,
+      toolCalls: data.toolCalls ?? null,
+      usage: data.usage ?? null,
+      durationMs: data.durationMs ?? null,
+      error: data.error ?? null,
+    });
   }
 
   async addAction(taskId: number, step: number, data: { tool: string; args?: unknown; ok: boolean; detail?: string; durationMs?: number }) {
-    await this.db.pool.query(
-      `INSERT INTO actions (task_id, step, tool, args, ok, detail, duration_ms) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [taskId, step, data.tool, JSON.stringify(data.args ?? null), data.ok, data.detail ?? null, data.durationMs ?? null],
-    );
+    await this.actions.save({
+      taskId,
+      step,
+      tool: data.tool,
+      args: data.args ?? null,
+      ok: data.ok,
+      detail: data.detail ?? null,
+      durationMs: data.durationMs ?? null,
+    });
   }
 
   async addUserAnswer(taskId: number, step: number, data: { question: string; answer?: string }) {
-    await this.db.pool.query(
-      `INSERT INTO user_answers (task_id, step, question, answer) VALUES ($1, $2, $3, $4)`,
-      [taskId, step, data.question, data.answer ?? null],
-    );
+    await this.userAnswers.save({ taskId, step, question: data.question, answer: data.answer ?? null });
   }
 
   async finishTask(taskId: number, data: { status: string; summary?: string; reason?: string; stepCount: number }) {
-    const res = await this.db.pool.query(
-      `UPDATE tasks SET status = $2, summary = $3, reason = $4, step_count = $5, finished_at = now() WHERE id = $1`,
-      [taskId, data.status, data.summary ?? null, data.reason ?? null, data.stepCount],
-    );
-    if (res.rowCount === 0) throw new NotFoundException(`task ${taskId} not found`);
-
+    const result = await this.tasks.update({ id: taskId }, {
+      status: data.status,
+      summary: data.summary ?? null,
+      reason: data.reason ?? null,
+      stepCount: data.stepCount,
+      finishedAt: () => 'now()',
+    });
+    if ((result.affected ?? 0) === 0) throw new NotFoundException(`task ${taskId} not found`);
     const reply = data.summary?.trim() || data.reason?.trim();
     if (reply) {
-      await this.db.pool.query(`INSERT INTO task_messages (task_id, role, content) VALUES ($1, 'agent', $2)`, [taskId, reply]);
+      await this.messages.save({ taskId, role: 'agent', content: reply });
     }
   }
 
-  async ask(taskId: number, step: number, question: string): Promise<{ id: number }> {
-    const task = await this.db.pool.query(`SELECT id FROM tasks WHERE id = $1`, [taskId]);
-    if (task.rowCount === 0) throw new NotFoundException(`task ${taskId} not found`);
-    const res = await this.db.pool.query(
-      `INSERT INTO user_answers (task_id, step, question) VALUES ($1, $2, $3) RETURNING id`,
-      [taskId, step, question],
-    );
-    return { id: res.rows[0].id as number };
-  }
-
-  async pendingQuestion(): Promise<{ id: number; taskId: number; step: number; question: string; waitedMs: number } | null> {
-    const res = await this.db.pool.query(
-      `SELECT ua.id, ua.task_id, ua.step, ua.question, EXTRACT(EPOCH FROM (now() - ua.created_at)) * 1000 AS waited_ms
-       FROM user_answers ua JOIN tasks t ON t.id = ua.task_id
-       WHERE ua.answer IS NULL AND t.status = 'running'
-       ORDER BY ua.id LIMIT 1`,
-    );
-    if (res.rowCount === 0) return null;
-    const row = res.rows[0];
-    return { id: row.id, taskId: row.task_id, step: row.step, question: row.question, waitedMs: Number(row.waited_ms) };
-  }
-
-  async answer(answerId: number, answer: string): Promise<{ answered: boolean }> {
-    const res = await this.db.pool.query(
-      `UPDATE user_answers SET answer = $2 WHERE id = $1 AND answer IS NULL`,
-      [answerId, answer],
-    );
-    return { answered: (res.rowCount ?? 0) > 0 };
-  }
-
-  async getAnswer(answerId: number): Promise<{ answer: string | null }> {
-    const res = await this.db.pool.query(`SELECT answer FROM user_answers WHERE id = $1`, [answerId]);
-    if (res.rowCount === 0) return { answer: null };
-    return { answer: res.rows[0].answer ?? null };
-  }
-
-  async listMessages(taskId: number): Promise<Array<{ id: number; role: string; content: string; createdAt: Date }>> {
-    const task = await this.db.pool.query(`SELECT id FROM tasks WHERE id = $1`, [taskId]);
-    if (task.rowCount === 0) throw new NotFoundException(`task ${taskId} not found`);
-    const res = await this.db.pool.query(
-      `SELECT id, role, content, created_at FROM task_messages WHERE task_id = $1 ORDER BY id`,
-      [taskId],
-    );
-    return res.rows.map((r) => ({ id: r.id, role: r.role, content: r.content, createdAt: r.created_at }));
-  }
-
   async listTasks(limit = 50) {
-    const res = await this.db.pool.query(
-      `SELECT id, task_text, status, summary, reason, product, model, effort, step_count, created_at, finished_at FROM tasks ORDER BY created_at DESC LIMIT $1`,
-      [limit],
-    );
-    return res.rows.map((row) => ({
+    const rows = await this.tasks.find({ order: { createdAt: 'DESC' }, take: limit });
+    return rows.map((row) => ({
       id: row.id,
-      taskText: row.task_text,
+      taskText: row.taskText,
       status: row.status,
       summary: row.summary,
       reason: row.reason,
       product: row.product,
       model: row.model,
       effort: row.effort,
-      stepCount: row.step_count,
-      createdAt: row.created_at,
-      finishedAt: row.finished_at,
+      stepCount: row.stepCount,
+      createdAt: row.createdAt,
+      finishedAt: row.finishedAt,
     }));
   }
 
   async getDebugReport(taskId: number) {
-    const [taskRes, obsRes, llmRes, actRes, ansRes] = await Promise.all([
-      this.db.pool.query(`SELECT * FROM tasks WHERE id = $1`, [taskId]),
-      this.db.pool.query(`SELECT * FROM observations WHERE task_id = $1 ORDER BY step, created_at`, [taskId]),
-      this.db.pool.query(`SELECT * FROM llm_calls WHERE task_id = $1 ORDER BY step, created_at`, [taskId]),
-      this.db.pool.query(`SELECT * FROM actions WHERE task_id = $1 ORDER BY step, created_at`, [taskId]),
-      this.db.pool.query(`SELECT * FROM user_answers WHERE task_id = $1 ORDER BY step, created_at`, [taskId]),
-    ]);
-    if (taskRes.rowCount === 0) throw new NotFoundException(`task ${taskId} not found`);
-
+    const task = await this.tasks.findOneBy({ id: taskId });
+    if (!task) throw new NotFoundException(`task ${taskId} not found`);
     const trace: TaskTrace = {
-      task: taskRes.rows[0],
-      observations: obsRes.rows,
-      llmCalls: llmRes.rows,
-      actions: actRes.rows,
-      userAnswers: ansRes.rows,
+      task,
+      observations: await this.observations.find({ where: { taskId }, order: { step: 'ASC', createdAt: 'ASC' } }),
+      llmCalls: await this.llmCalls.find({ where: { taskId }, order: { step: 'ASC', createdAt: 'ASC' } }),
+      actions: await this.actions.find({ where: { taskId }, order: { step: 'ASC', createdAt: 'ASC' } }),
+      userAnswers: await this.userAnswers.find({ where: { taskId }, order: { step: 'ASC', createdAt: 'ASC' } }),
     };
     return buildDebugReport(trace);
+  }
+
+  async ask(taskId: number, step: number, question: string): Promise<{ id: number }> {
+    const task = await this.tasks.findOneBy({ id: taskId });
+    if (!task) throw new NotFoundException(`task ${taskId} not found`);
+    const saved = await this.userAnswers.save({ taskId, step, question });
+    return { id: Number(saved.id) };
+  }
+
+  async pendingQuestion(): Promise<{ id: number; taskId: number; step: number; question: string; waitedMs: number } | null> {
+    const row = await this.userAnswers
+      .createQueryBuilder('ua')
+      .innerJoin(Task, 't', 't.id = ua.task_id')
+      .where('ua.answer IS NULL AND t.status = :running', { running: 'running' })
+      .orderBy('ua.id', 'ASC')
+      .addSelect('EXTRACT(EPOCH FROM (now() - ua.created_at)) * 1000', 'waited_ms')
+      .getRawOne();
+    if (!row) return null;
+    return { id: Number(row.ua_id), taskId: Number(row.ua_task_id), step: Number(row.ua_step), question: row.ua_question, waitedMs: Number(row.waited_ms) };
+  }
+
+  async answer(answerId: number, answer: string): Promise<{ answered: boolean }> {
+    const result = await this.userAnswers.createQueryBuilder()
+      .update()
+      .set({ answer })
+      .where('id = :id AND answer IS NULL', { id: answerId })
+      .execute();
+    return { answered: (result.affected ?? 0) > 0 };
+  }
+
+  async getAnswer(answerId: number): Promise<{ answer: string | null }> {
+    const row = await this.userAnswers.createQueryBuilder('ua')
+      .where('ua.id = :id', { id: answerId })
+      .getRawOne();
+    return { answer: row?.ua_answer ?? null };
+  }
+
+  async listMessages(taskId: number): Promise<Array<{ id: number; role: string; content: string; createdAt: Date }>> {
+    const task = await this.tasks.findOneBy({ id: taskId });
+    if (!task) throw new NotFoundException(`task ${taskId} not found`);
+    const rows = await this.messages.find({ where: { taskId }, order: { id: 'ASC' } });
+    return rows.map((r) => ({ id: Number(r.id), role: r.role, content: r.content, createdAt: r.createdAt }));
   }
 }
