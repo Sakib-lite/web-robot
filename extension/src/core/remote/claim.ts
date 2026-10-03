@@ -16,7 +16,7 @@ export async function runClaimedTask(
   const active = await resolveActiveProvider(createProductStore(chromeArea()), undefined, { url: backendUrl });
   const taskModel = claim.model && active && getProduct(active.productId)?.models?.includes(claim.model) ? claim.model : undefined;
   if (!active) {
-    await fetch(`${backendUrl}/tasks/${taskId}/finish`, {
+    await fetch(`${backendUrl}/tasks/${taskId}/finish`, { signal: AbortSignal.timeout(4000),
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ status: 'failed', reason: 'no llm provider configured', stepCount: 0 }),
@@ -30,7 +30,7 @@ export async function runClaimedTask(
   let maxSteps: number | undefined;
   if (lastMessage && lastMessage !== taskText) {
     try {
-      const res = await fetch(`${backendUrl}/tasks/${taskId}/messages`);
+      const res = await fetch(`${backendUrl}/tasks/${taskId}/messages`, { signal: AbortSignal.timeout(4000) });
       if (res.ok) {
         const body = (await res.json()) as { messages?: Array<{ role: string; content: string }> };
         const lines = (body.messages ?? [])
@@ -49,7 +49,7 @@ export async function runClaimedTask(
   }
   if (skill) {
     try {
-      const res = await fetch(`${backendUrl}/skills/${encodeURIComponent(skill)}`);
+      const res = await fetch(`${backendUrl}/skills/${encodeURIComponent(skill)}`, { signal: AbortSignal.timeout(4000) });
       if (res.ok) {
         const full = (await res.json()) as { name?: string; body?: string; defaults?: Record<string, string> };
         if (full.defaults?.model && !taskModel) provider = { ...provider, model: full.defaults.model };
@@ -62,7 +62,7 @@ export async function runClaimedTask(
   }
   if (context) {
     try {
-      const res = await fetch(`${backendUrl}/contexts/${encodeURIComponent(context)}`);
+      const res = await fetch(`${backendUrl}/contexts/${encodeURIComponent(context)}`, { signal: AbortSignal.timeout(4000) });
       if (res.ok) {
         const full = (await res.json()) as { name?: string; body?: string };
         if (full.body) {
