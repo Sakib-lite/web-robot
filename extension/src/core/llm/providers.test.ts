@@ -88,4 +88,34 @@ describe('product store', () => {
     await seedFromEnv(store, null);
     expect((await area.get('llmProviders'))['llmProviders']).toBeNull();
   });
+
+  it('adds custom models without duplicates and rejects empty ids', async () => {
+    const store = createProductStore(memoryArea());
+    await store.addCustomModel('ollama', 'gemma4:26b');
+    expect(await store.addCustomModel('ollama', 'gemma4:26b')).toEqual(['gemma4:26b']);
+    expect(await store.addCustomModel('ollama', 'qwen3:30b')).toEqual(['gemma4:26b', 'qwen3:30b']);
+    expect(await store.customModelsFor('glm')).toEqual([]);
+    await expect(store.addCustomModel('ollama', '   ')).rejects.toThrow('model id is required');
+  });
+
+  it('keeps custom models when configs save and clear around them', async () => {
+    const store = createProductStore(memoryArea());
+    await store.addCustomModel('ollama', 'gemma4:26b');
+    await store.save(glmConfig());
+    expect(await store.customModelsFor('ollama')).toEqual(['gemma4:26b']);
+    await store.clear('glm');
+    expect(await store.customModelsFor('ollama')).toEqual(['gemma4:26b']);
+  });
+
+  it('removes custom models and reports all of them per product', async () => {
+    const store = createProductStore(memoryArea());
+    await store.addCustomModel('ollama', 'gemma4:26b');
+    await store.addCustomModel('ollama', 'qwen3:30b');
+    await store.addCustomModel('glm', 'glm-5.5');
+    expect(await store.removeCustomModel('ollama', 'gemma4:26b')).toEqual(['qwen3:30b']);
+    expect(await store.removeCustomModel('ollama', 'not-there')).toEqual(['qwen3:30b']);
+    const all = await store.allCustomModels();
+    expect(all['ollama']).toEqual(['qwen3:30b']);
+    expect(all['glm']).toEqual(['glm-5.5']);
+  });
 });

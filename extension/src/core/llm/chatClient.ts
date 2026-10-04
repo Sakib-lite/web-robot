@@ -63,15 +63,20 @@ export async function chatCompletion(
     ...(req.thinking !== undefined ? { thinking: req.thinking } : {}),
   });
 
-  const res = await fetchFn(`${provider.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...(provider.apiKey ? { authorization: `Bearer ${provider.apiKey}` } : {}),
-    },
-    body: JSON.stringify(payload),
-    signal: req.signal,
-  });
+  let res!: Response;
+  for (let attempt = 1; ; attempt++) {
+    res = await fetchFn(`${provider.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(provider.apiKey ? { authorization: `Bearer ${provider.apiKey}` } : {}),
+      },
+      body: JSON.stringify(payload),
+      signal: req.signal,
+    });
+    if (res.ok || res.status < 500 || res.status > 504 || attempt >= 3 || req.signal?.aborted) break;
+    await new Promise((r) => setTimeout(r, 1500 * attempt));
+  }
 
   const body = await res.text();
   if (!res.ok) {

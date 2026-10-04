@@ -96,4 +96,34 @@ describe('chatCompletion wire behavior per product', () => {
     const call = chatCompletion(provider(), { messages: [] }, async () => new Response('not json', { status: 200 }));
     await expect(call).rejects.toThrow('invalid json');
   });
+
+  it('retries transient 5xx responses and succeeds', async () => {
+    let calls = 0;
+    const res = await chatCompletion(provider(), { messages: [] }, async () => {
+      calls++;
+      return calls === 1 ? jsonResponse(500, { error: 'error parsing tool call' }) : jsonResponse(200, okBody());
+    });
+    expect(calls).toBe(2);
+    expect(res.content).toBe('ok');
+  });
+
+  it('gives up after three attempts on persistent 5xx', async () => {
+    let calls = 0;
+    const call = chatCompletion(provider(), { messages: [] }, async () => {
+      calls++;
+      return jsonResponse(502, { error: 'down' });
+    });
+    await expect(call).rejects.toThrow('llm request failed (502)');
+    expect(calls).toBe(3);
+  });
+
+  it('does not retry client errors', async () => {
+    let calls = 0;
+    const call = chatCompletion(provider(), { messages: [] }, async () => {
+      calls++;
+      return jsonResponse(403, { error: 'forbidden' });
+    });
+    await expect(call).rejects.toThrow('llm request failed (403)');
+    expect(calls).toBe(1);
+  });
 });

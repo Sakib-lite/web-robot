@@ -135,3 +135,17 @@ export function getProduct(id: ProductId): LlmProduct {
 export function allProducts(): LlmProduct[] {
   return Object.values(PRODUCTS);
 }
+
+export function catalogModels(product: LlmProduct, custom: readonly unknown[] = []): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const entries = [...(product.models ?? [product.defaults.model]), ...custom].flat(2) as unknown[];
+  for (const model of entries) {
+    if (typeof model !== 'string' && typeof model !== 'number') continue;
+    const key = String(model).trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  return out;
+}

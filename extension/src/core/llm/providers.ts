@@ -24,11 +24,16 @@ export interface ProductStore {
   save(input: ProductConfigInput): Promise<StoredProductConfig>;
   activate(productId: ProductId): Promise<void>;
   clear(productId: ProductId): Promise<void>;
+  allCustomModels(): Promise<Partial<Record<ProductId, string[]>>>;
+  customModelsFor(productId: ProductId): Promise<string[]>;
+  addCustomModel(productId: ProductId, model: string): Promise<string[]>;
+  removeCustomModel(productId: ProductId, model: string): Promise<string[]>;
 }
 
 interface StoredShape {
   configs?: Partial<Record<ProductId, LlmProvider>>;
   active?: ProductId;
+  customModels?: Partial<Record<ProductId, string[]>>;
 }
 
 const KEY = 'llmProductConfigs';
@@ -100,7 +105,34 @@ export function createProductStore(area: StorageArea): ProductStore {
       if (!shape.configs?.[productId]) return;
       const configs = { ...shape.configs };
       delete configs[productId];
-      await write({ configs, active: shape.active === productId ? undefined : shape.active });
+      await write({ ...shape, configs, active: shape.active === productId ? undefined : shape.active });
+    },
+
+    async allCustomModels() {
+      const { customModels } = await readShape(area);
+      return customModels ?? {};
+    },
+
+    async customModelsFor(productId) {
+      return (await this.allCustomModels())[productId] ?? [];
+    },
+
+    async addCustomModel(productId, model) {
+      const value = model.trim();
+      if (!value) throw new Error('model id is required');
+      const shape = await readShape(area);
+      const current = shape.customModels?.[productId] ?? [];
+      const next = current.includes(value) ? current : [...current, value];
+      await write({ ...shape, customModels: { ...shape.customModels, [productId]: next } });
+      return next;
+    },
+
+    async removeCustomModel(productId, model) {
+      const shape = await readShape(area);
+      const current = shape.customModels?.[productId] ?? [];
+      const next = current.filter((m) => m !== model);
+      await write({ ...shape, customModels: { ...shape.customModels, [productId]: next } });
+      return next;
     },
   };
   return store;

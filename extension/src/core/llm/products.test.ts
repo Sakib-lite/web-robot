@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allProducts, getProduct } from './products';
+import { allProducts, catalogModels, getProduct } from './products';
 import type { LlmProvider } from './providers';
 
 function provider(over: Partial<LlmProvider> = {}): LlmProvider {
@@ -10,6 +10,20 @@ describe('product registry', () => {
   it('has one strategy per product id', () => {
     expect(allProducts().map((p) => p.id)).toEqual(['glm', 'openai', 'generic', 'ollama']);
     expect(getProduct('openai').label).toBe('OpenAI');
+  });
+});
+
+describe('catalogModels', () => {
+  it('appends custom models to the static catalog and dedupes', () => {
+    const ollama = getProduct('ollama');
+    expect(catalogModels(ollama, ['gpt-oss:20b', 'qwen3:30b'])).toEqual([...ollama.models!, 'qwen3:30b']);
+    expect(catalogModels(getProduct('glm'), ['glm-5.3', 'custom-finetune'])).toEqual([...getProduct('glm').models!, 'custom-finetune']);
+  });
+
+  it('falls back to the product default when no catalog exists and drops blanks', () => {
+    const generic = getProduct('generic');
+    expect(catalogModels(generic)).toEqual([generic.defaults.model]);
+    expect(catalogModels(generic, ['', '   ', 'router/model-x'])).toEqual([generic.defaults.model, 'router/model-x']);
   });
 });
 
@@ -118,5 +132,12 @@ describe('db-backed provider resolution', () => {
     expect(calls[0]).toMatchObject({ url: 'http://backend.test/providers/glm', method: 'PUT' });
     expect(JSON.parse(calls[0]!.body!)).toEqual({ apiKey: 'sk', baseUrl: 'https://api.z.ai/api/coding/paas/v4', model: 'glm-5.3', effort: 'high' });
     expect(calls[1]).toMatchObject({ url: 'http://backend.test/providers/glm/activate', method: 'POST' });
+  });
+});
+
+describe('catalogModels hardening', () => {
+  it('tolerates non-string and nested entries from storage without crashing', () => {
+    expect(catalogModels(getProduct('ollama'), ['gemma4:26b', ['nested-model'], 42, null, { x: 1 } as never]))
+      .toEqual(expect.arrayContaining(['gemma4:26b', 'nested-model', '42']));
   });
 });
