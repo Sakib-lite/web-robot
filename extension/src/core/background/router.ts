@@ -23,13 +23,21 @@ async function activeTab(tabsApi: TabsApi): Promise<chrome.tabs.Tab | null> {
   return any ?? null;
 }
 
+function withDeadline<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)),
+  ]);
+}
+
 async function sendToTab(tabsApi: TabsApi, tabId: number, message: ContentRequest): Promise<ContentResponse> {
   try {
-    const res = await tabsApi.sendMessage(tabId, message);
+    const res = await withDeadline(tabsApi.sendMessage(tabId, message), 15000, `content script ${message.type}`);
     if (res && typeof res === 'object' && 'ok' in res) return res as ContentResponse;
     return { ok: false, error: 'content script returned nothing' };
-  } catch {
-    return { ok: false, error: 'content script is not loaded in this tab' };
+  } catch (e) {
+    const msg = e instanceof Error && e.message.includes('timed out') ? e.message : 'content script is not loaded in this tab';
+    return { ok: false, error: msg };
   }
 }
 
@@ -49,7 +57,11 @@ async function runBrowserAction(tab: chrome.tabs.Tab | undefined, action: Action
       if (!tab?.id) return { ok: false, error: 'no active tab to navigate' };
       const url = navigableUrl(action.url);
       if (!url) return { ok: false, error: `not a navigable url: ${action.url}` };
-      if (tab.url === url) return { ok: true, detail: `already at ${url}` };
+      if (tab.url === url) {
+        await tabsApi.reload(tab.id);
+        await sleep(1500);
+        return { ok: true, detail: `reloaded ${url} (fresh page state)` };
+      }
       await tabsApi.update(tab.id, { url });
       await sleep(600);
       return { ok: true, detail: `navigated to ${url}` };
@@ -109,7 +121,7 @@ export async function handleMessage(message: PanelRequest, apis: BrowserApis): P
     if (!tab?.id) return { ok: false, error: 'no active tab' };
     if (!tab.url?.startsWith('http')) return { ok: false, error: `cannot read this page (${tab.url ?? 'unknown url'})` };
     await ensureInjected(tabsApi, scriptingApi, tab.id);
-    const res = await sendToTab(tabsApi, tab.id, { type: 'SNAPSHOT' });
+    const res = await sendToTab(tabsApi, tab.id, { type: 'SNAPSHOT', ...(message.skip !== undefined ? { skip: message.skip } : {}) });
     if (!res.ok) return { ok: false, error: res.error };
     if (!res.snapshot) return { ok: false, error: 'content script returned no snapshot' };
     return { ok: true, snapshot: res.snapshot };

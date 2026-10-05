@@ -23,21 +23,15 @@ const MAX_TEXT = 4000;
 
 export function collectInteractive(root: ParentNode): Element[] {
   const nodes = Array.from(root.querySelectorAll(INTERACTIVE_SELECTOR));
-  const visible = nodes.filter((el) => {
-    if (el instanceof HTMLInputElement && el.type === 'hidden') return false;
-    if (el.getAttribute('aria-hidden') === 'true') return false;
-    return el.getClientRects().length > 0;
-  });
-  return visible.slice(0, MAX_ELEMENTS);
-}
-
-export function countInteractive(root: ParentNode): number {
-  const nodes = Array.from(root.querySelectorAll(INTERACTIVE_SELECTOR));
   return nodes.filter((el) => {
     if (el instanceof HTMLInputElement && el.type === 'hidden') return false;
     if (el.getAttribute('aria-hidden') === 'true') return false;
     return el.getClientRects().length > 0;
-  }).length;
+  });
+}
+
+export function countInteractive(root: ParentNode): number {
+  return collectInteractive(root).length;
 }
 
 function labelFor(el: Element): string {
@@ -125,15 +119,17 @@ export function describeElement(el: Element, index: number): ElementInfo {
   };
 }
 
-export function buildSnapshot(doc: Document): Snapshot {
-  const total = countInteractive(doc);
-  const elements = collectInteractive(doc).map((el, index) => describeElement(el, index));
+export function buildSnapshot(doc: Document, skip = 0): Snapshot {
+  const all = collectInteractive(doc);
+  const start = Math.min(Math.max(0, Math.floor(skip)), Math.max(0, all.length - 1));
+  const window = all.slice(start, start + MAX_ELEMENTS);
+  const elements = window.map((el, index) => describeElement(el, start + index));
   const mainRoot = doc.querySelector('main, [role="main"], article') as HTMLElement | null;
   let rawText = mainRoot?.innerText ?? '';
+  const mainLen = rawText.trim().length;
   if (doc.body) {
-    const mainLen = rawText.trim().length;
     const bodyText = doc.body.innerText ?? '';
-    if (bodyText.trim().length > mainLen * 3) rawText = bodyText;
+    if (mainLen < 200 && bodyText.trim().length > mainLen * 3) rawText = bodyText;
   }
   const text = rawText.replace(/[ \t]+\n/g, '\n').replace(/\n{2,}/g, '\n').trim();
   return {
@@ -142,7 +138,9 @@ export function buildSnapshot(doc: Document): Snapshot {
     text: text.slice(0, MAX_TEXT),
     textTruncated: text.length > MAX_TEXT,
     elements,
-    elementsTruncated: total > MAX_ELEMENTS,
+    elementsTruncated: start + window.length < all.length,
+    elementStart: start,
+    elementTotal: all.length,
   };
 }
 

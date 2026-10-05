@@ -16,6 +16,8 @@ export interface Snapshot {
   textTruncated?: boolean;
   elements: ElementInfo[];
   elementsTruncated?: boolean;
+  elementStart?: number;
+  elementTotal?: number;
 }
 
 export interface TabInfo {
@@ -46,6 +48,6 @@ export interface ActionResult {
 
 export interface Driver {
   tabs(): Promise<TabInfo[]>;
-  snapshot(): Promise<Snapshot>;
+  snapshot(skip?: number): Promise<Snapshot>;
   act(action: Action): Promise<ActionResult>;
 }

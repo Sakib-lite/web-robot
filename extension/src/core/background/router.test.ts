@@ -5,13 +5,14 @@ import type { Snapshot } from '../driver/types';
 
 const snapshot: Snapshot = { url: 'https://shop.dev', title: 'Shop', text: 'hi', elements: [] };
 
-function fakeTabs(over: Partial<Record<'query' | 'sendMessage' | 'update' | 'create' | 'remove', (...args: never[]) => unknown>> = {}) {
+function fakeTabs(over: Partial<Record<'query' | 'sendMessage' | 'update' | 'create' | 'remove' | 'reload', (...args: never[]) => unknown>> = {}) {
   return {
     query: async () => [] as chrome.tabs.Tab[],
     sendMessage: async () => undefined,
     update: async () => ({}) as chrome.tabs.Tab,
     create: async () => ({ id: 9 }) as chrome.tabs.Tab,
     remove: async () => undefined,
+    reload: async () => undefined,
     ...over,
   } as unknown as typeof chrome.tabs;
 }
@@ -126,14 +127,17 @@ describe('handleMessage', () => {
     expect(bad.ok).toBe(false);
   });
 
-  it('skips navigation when the active tab is already at the url', async () => {
+  it('reloads instead of navigating when the active tab is already at the url', async () => {
+    const reload = vi.fn(async () => undefined);
     const update = vi.fn(async () => ({}));
     const tabs = fakeTabs({
       query: async () => [{ id: 7, url: 'https://same.dev/page', title: 'Same', active: true }],
       update,
+      reload,
     });
     const res = await handleMessage({ type: 'RUN_ACTION', action: { type: 'goto', url: 'https://same.dev/page' } }, { tabs, scripting: fakeScripting() });
-    expect(res).toEqual({ ok: true, detail: 'already at https://same.dev/page' });
+    expect(res).toEqual({ ok: true, detail: 'reloaded https://same.dev/page (fresh page state)' });
+    expect(reload).toHaveBeenCalledWith(7);
     expect(update).not.toHaveBeenCalled();
   });
 

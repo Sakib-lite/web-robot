@@ -16,7 +16,7 @@ export default defineContentScript({
     chrome.runtime.onMessage.addListener((message: ContentRequest, _sender, sendResponse) => {
       if (message?.type === 'SNAPSHOT') {
         elements = collectInteractive(document);
-        sendResponse({ ok: true, snapshot: buildSnapshot(document) });
+        sendResponse({ ok: true, snapshot: buildSnapshot(document, message.skip ?? 0) });
         return;
       }
       if (message?.type === 'ACT') {

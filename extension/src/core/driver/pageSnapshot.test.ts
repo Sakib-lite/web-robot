@@ -31,9 +31,9 @@ describe('collectInteractive', () => {
     expect(collected[0]!.id).toBe('visible');
   });
 
-  it('caps the element list', () => {
+  it('returns every visible element (windowing happens in buildSnapshot)', () => {
     withBody(Array.from({ length: 120 }, (_, i) => `<a href="/x${i}">x${i}</a>`).join(''));
-    expect(collectInteractive(document)).toHaveLength(80);
+    expect(collectInteractive(document)).toHaveLength(120);
   });
 });
 
@@ -120,6 +120,26 @@ describe('truncation + thin-main fallback (the phd.com lesson)', () => {
     expect(snap.elementsTruncated).toBe(true);
   });
 
+  it('pages through long element lists with skip and stable absolute refs', () => {
+    withBody(Array.from({ length: 120 }, (_, i) => `<a href="/x${i}">link ${i}</a>`).join(''));
+    const first = buildSnapshot(document);
+    expect(first.elementStart).toBe(0);
+    expect(first.elementTotal).toBe(120);
+    expect(first.elements[0]!.ref).toBe('e1');
+    expect(first.elements[79]!.ref).toBe('e80');
+
+    const second = buildSnapshot(document, 80);
+    expect(second.elements).toHaveLength(40);
+    expect(second.elements[0]!.ref).toBe('e81');
+    expect(second.elements[39]!.ref).toBe('e120');
+    expect(second.elementsTruncated).toBe(false);
+    expect(second.elementStart).toBe(80);
+
+    const past = buildSnapshot(document, 500);
+    expect(past.elements).toHaveLength(1);
+    expect(past.elements[0]!.ref).toBe('e120');
+  });
+
   it('does not mark truncation when under the cap', () => {
     withBody('<a href="/a">a</a><button>b</button>');
     const snap = buildSnapshot(document);
@@ -156,5 +176,22 @@ describe('truncation + thin-main fallback (the phd.com lesson)', () => {
     const snap = buildSnapshot(document);
     expect(snap.text).toContain('article content');
     expect(snap.text).not.toContain('footer noise');
+  });
+
+  it('shows a substantial main panel once it opens (the phd.com detail lesson)', () => {
+    withBody(`
+      <aside>${`<div role="button">Job row with details ${'x'.repeat(120)}</div>`.repeat(48)}</aside>
+      <main>Full Funded PhD Programme (ISTA)
+Institute of Science and Technology Austria (ISTA)
+Field: Computer Science / Data Science
+Location: Austria (near Vienna)
+Deadline: 8 January 2027, 3:00 PM CET
+Funding: €3,053–€3,670 per month (gross)
+Contact: prof@example.edu — send CV, transcripts and two referee names before the deadline; English proficiency proof at B2 level or higher is part of the required admission details.</main>
+    `);
+    const snap = buildSnapshot(document);
+    expect(snap.text).toContain('Deadline: 8 January 2027');
+    expect(snap.text).toContain('prof@example.edu');
+    expect(snap.text).not.toContain('Job row with details');
   });
 });
