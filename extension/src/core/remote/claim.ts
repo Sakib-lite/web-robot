@@ -1,6 +1,6 @@
 import { createDriver } from '../driver/extensionDriver';
 import { createHttpPlane } from '../local/httpPlane';
-import { getProduct } from '../llm/products';
+import { getProduct, catalogModels } from '../llm/products';
 import { resolveActiveProvider, createProductStore } from '../llm/providers';
 import type { ClaimedTask } from '../common/types';
 import { chromeArea } from '../storage/area';
@@ -13,8 +13,12 @@ export async function runClaimedTask(
 ): Promise<void> {
   const { taskId, taskText, skill, context, steps, lastMessage } = claim;
   const taskEffort = claim.effort;
-  const active = await resolveActiveProvider(createProductStore(chromeArea()), undefined, { url: backendUrl });
-  const taskModel = claim.model && active && getProduct(active.productId)?.models?.includes(claim.model) ? claim.model : undefined;
+  const store = createProductStore(chromeArea());
+  const active = await resolveActiveProvider(store, undefined, { url: backendUrl });
+  const product = active ? getProduct(active.productId) : undefined;
+  const saved = active?.model ? [active.model] : [];
+  const knownModels = product ? catalogModels(product, [...saved, await store.customModelsFor(product.id)]) : [];
+  const taskModel = claim.model && active && knownModels.includes(claim.model) ? claim.model : undefined;
   if (!active) {
     await fetch(`${backendUrl}/tasks/${taskId}/finish`, { signal: AbortSignal.timeout(4000),
       method: 'POST',

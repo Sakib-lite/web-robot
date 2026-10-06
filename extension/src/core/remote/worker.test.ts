@@ -25,8 +25,7 @@ function deps(over: Partial<RemoteDeps> = {}): RemoteDeps {
 }
 
 describe('maybeRunRemoteWork', () => {
-  it('stays idle when the backend is unreachable', async () => {
-    const fetchFn = (async () => {
+  it('stays idle when the backend is unreachable', async () => {    const fetchFn = (async () => {
       throw new Error('connection refused');
     }) as unknown as typeof fetch;
     expect(await maybeRunRemoteWork(deps({ fetchFn }))).toContain('control fetch failed');
@@ -140,5 +139,51 @@ describe('maybeRunRemoteWork', () => {
     release();
     expect(await first).toBe('started');
     expect(runTask).toHaveBeenCalledOnce();
+  });
+
+  it('reboots a zombie runner whose task went terminal while busy', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const reload = vi.fn();
+    const fetchFn = jsonResponder({
+      '/control/reload': { reload: false },
+      '/queue/next': { taskId: 7, taskText: 'hung task' },
+      '/tasks': [{ id: 7, status: 'stopped' }],
+    });
+    const runTask = vi.fn(async () => {
+      await gate;
+    });
+    const workerDeps = deps({ fetchFn, runTask, reload });
+    const first = maybeRunRemoteWork(workerDeps);
+    await vi.waitFor(() => expect(runTask).toHaveBeenCalledOnce());
+    expect(await maybeRunRemoteWork(workerDeps)).toContain('zombie runner');
+    expect(reload).toHaveBeenCalledOnce();
+    release();
+    await first;
+  });
+
+  it('keeps heartbeating while the busy task is still running', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const reload = vi.fn();
+    const fetchFn = jsonResponder({
+      '/control/reload': { reload: false },
+      '/queue/next': { taskId: 7, taskText: 'healthy task' },
+      '/tasks': [{ id: 7, status: 'running' }],
+    });
+    const runTask = vi.fn(async () => {
+      await gate;
+    });
+    const workerDeps = deps({ fetchFn, runTask, reload });
+    const first = maybeRunRemoteWork(workerDeps);
+    await vi.waitFor(() => expect(runTask).toHaveBeenCalledOnce());
+    expect(await maybeRunRemoteWork(workerDeps)).toBe('busy');
+    expect(reload).not.toHaveBeenCalled();
+    release();
+    await first;
   });
 });

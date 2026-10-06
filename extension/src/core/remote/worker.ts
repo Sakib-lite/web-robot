@@ -40,6 +40,16 @@ export async function maybeRunRemoteWork(deps: RemoteDeps): Promise<string> {
           signal: AbortSignal.timeout(4000),
         })
         .catch(() => undefined);
+      try {
+        const res = await deps.fetchFn(`${backendUrl}/tasks?limit=30`, { signal: AbortSignal.timeout(4000) });
+        const rows = (await res.json()) as Array<{ id: number; status: string }>;
+        const mine = Array.isArray(rows) ? rows.find((t) => t.id === currentTaskId) : undefined;
+        if (mine && ['stopped', 'failed', 'completed', 'done', 'canceled'].includes(mine.status)) {
+          deps.reload();
+          return `zombie runner for task ${currentTaskId} (${mine.status}) - rebooting`;
+        }
+      } catch {
+      }
     }
     return 'busy';
   }
@@ -84,8 +94,13 @@ export async function maybeRunRemoteWork(deps: RemoteDeps): Promise<string> {
       return `idle (queue fetch failed: ${error instanceof Error ? error.message : String(error)})`;
     }
     if (queued?.taskId && queued.taskText) {
-      await deps.showPanel().catch(() => undefined);
-      await deps.runTask(queued as ClaimedTask, backendUrl);
+      currentTaskId = queued.taskId;
+      try {
+        await deps.showPanel().catch(() => undefined);
+        await deps.runTask(queued as ClaimedTask, backendUrl);
+      } finally {
+        currentTaskId = null;
+      }
       return 'started';
     }
     return `idle (queue empty)`;
@@ -115,12 +130,7 @@ function remoteDepsForDriver(makeDriver: () => ReturnType<typeof createDriver>, 
     saveWorkerEnabled: (enabled) => saveRemoteWorkerEnabled(enabled, chromeArea()),
     showPanel: openExtensionPanel,
     runTask: async (claim, backendUrl) => {
-      currentTaskId = claim.taskId;
-      try {
-        await runClaimedTask(claim, backendUrl, makeDriver());
-      } finally {
-        currentTaskId = null;
-      }
+      await runClaimedTask(claim, backendUrl, makeDriver());
     },
   };
 }
