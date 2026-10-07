@@ -3,4 +3,5 @@ export class CreateTaskDto {
   product?: string;
   model?: string;
   effort?: string;
+  steps?: string[];
 }
