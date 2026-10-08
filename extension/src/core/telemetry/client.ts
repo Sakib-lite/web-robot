@@ -23,6 +23,7 @@ interface TaskMeta {
   product: string;
   model: string;
   effort: string;
+  steps?: string[];
 }
 
 async function post(url: string, body: unknown): Promise<Response> {
