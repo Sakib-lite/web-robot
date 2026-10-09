@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { isDangerous, runTask, type LoopDeps, type StepRecord } from './loop';
 import type { Action, Driver, Snapshot, TabInfo } from '../driver/types';
-import type { ChatResponse, ToolCall } from '../llm/chatClient';
+import type { ChatMessage, ChatResponse, ToolCall } from '../llm/chatClient';
 import { PlaneError } from '../local/plane';
 
 function toolCall(name: string, args: Record<string, unknown>): ToolCall {
@@ -62,7 +62,8 @@ describe('runTask', () => {
     const result = await runTask('open the offers page', deps({ driver, chat }));
 
     expect(result.status).toBe('done');
-    expect(result.summary).toBe('opened offers');
+    expect(result.summary).toContain('opened offers');
+    expect(result.summary).toContain('distinct page states observed');
     expect(result.steps).toHaveLength(1);
     expect(result.steps[0]!.call).toBe('goto https://shop.dev/offers');
     expect(chat).toHaveBeenCalledTimes(2);
@@ -209,6 +210,98 @@ describe('runTask', () => {
 
     expect(result.status).toBe('failed');
     expect(result.reason).toContain('stalled');
+  });
+
+  it('bounces a defeatist done while uncollected element pages exist, then accepts real work', async () => {
+    const paged = snapshot({
+      elements: [{ ref: 'e1', tag: 'a', kind: 'link', name: 'row 1' }],
+      elementsTruncated: true,
+      elementStart: 0,
+      elementTotal: 200,
+    });
+    const driver = fakeDriver({ snapshot: async () => paged });
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'Task incomplete: unable to fully collect data within allowed steps.' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('snapshot', { skip: 1 })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'collected everything after paging' })]));
+    const result = await runTask('collect all rows', deps({ driver, chat }));
+
+    expect(result.status).toBe('done');
+    expect(result.summary).toContain('collected everything');
+    const bounce = chat.mock.calls[1]![0] as ChatMessage[];
+    expect(bounce.some((m) => m.content?.toLowerCase().includes('do the work instead'))).toBe(true);
+  });
+
+  it('bounces a defeatist done late in a run too (resume case), twice max', async () => {
+    const driver = fakeDriver({ act: async () => ({ ok: true, detail: 'clicked e1' }) });
+    const defeat = reply('', [toolCall('done', { summary: 'Partial execution: could not click each job, task incomplete.' })]);
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('click', { ref: 'e1' })]))
+      .mockResolvedValueOnce(defeat)
+      .mockResolvedValueOnce(reply('', [toolCall('click', { ref: 'e1' })]))
+      .mockResolvedValueOnce(defeat)
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'gave up: task incomplete and nothing produced.' })]));
+    const result = await runTask('collect all rows', deps({ driver, chat }));
+
+    expect(result.status).toBe('done');
+    const bounces = chat.mock.calls.filter((c) => (c[0] as ChatMessage[]).some((m) => m.content?.includes('Second defeatist done') || m.content?.toLowerCase().includes('do the work instead')));
+    expect(bounces).toHaveLength(2);
+  });
+
+  it('nudges, warns once, then fails a model that keeps looping on update_plan', async () => {
+    let n = 0;
+    const chat = vi.fn(async () => reply('', [toolCall('update_plan', { items: [{ text: 'step a' }, { text: `step b ${++n}` }] })]));
+    const result = await runTask('collect rows', deps({ chat: chat as never }));
+    expect(result.status).toBe('failed');
+    expect(result.reason).toContain('consecutive update_plan');
+    const contents = (chat.mock.calls.map((c) => (c[0] as ChatMessage[]).map((m) => m.content ?? '').join('\n')));
+    expect(contents.some((c) => c.includes('rewriting the plan instead of working'))).toBe(true);
+    expect(contents.some((c) => c.includes('FINAL WARNING'))).toBe(true);
+  });
+
+  it('marks identical update_plan calls as no-progress but stays alive', async () => {
+    const same = () => reply('', [toolCall('update_plan', { items: [{ text: 'only step' }] })]);
+    const chat = vi.fn<never>()
+      .mockImplementationOnce(same)
+      .mockImplementationOnce(same)
+      .mockImplementationOnce(async () => reply('', [toolCall('done', { summary: 'did the work' })]));
+    const result = await runTask('do it', deps({ chat: chat as never }));
+    expect(result.status).toBe('done');
+  });
+
+  it('accepts a partial-styled done once no pages remain unseen', async () => {
+    const full = snapshot({ elementsTruncated: false, elementStart: 0, elementTotal: 1, elements: [{ ref: 'e1', tag: 'a', kind: 'link', name: 'only row' }] });
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'partial result: 3 of 5 sites failed but rest reported' })]));
+    const result = await runTask('check sites', deps({ chat: chat as never, driver: fakeDriver() }));
+    expect(result.status).toBe('done');
+    expect(chat).toHaveBeenCalledTimes(1);
+    void full;
+  });
+
+  it('converts a confirmed stall into a graceful partial done instead of failing outright', async () => {
+    const driver = fakeDriver({ act: async () => ({ ok: true, detail: 'clicked e1' }) });
+    let sawVerdict = false;
+    const chat = vi.fn(async (messages: ChatMessage[]) => {
+      if (messages.some((m) => m.role === 'user' && m.content?.includes('FAILURE:'))) {
+        sawVerdict = true;
+        return reply('no verdict available', [toolCall('click', { ref: 'e1' })]);
+      }
+      if (sawVerdict) return reply('', [toolCall('done', { summary: 'partial: 17 of 48 universities saved to universities.md' })]);
+      return reply('', [toolCall('click', { ref: 'e1' })]);
+    });
+    const result = await runTask('collect all universities', deps({ driver, chat }));
+
+    expect(result.status).toBe('done');
+    expect(result.summary).toContain('17 of 48');
+
+    const doneCall = chat.mock.calls.find((c) =>
+      (c[0] as ChatMessage[]).some((m) => m.content?.includes('Call done NOW')),
+    );
+    expect(doneCall).toBeDefined();
   });
 
   it('blocks navigation ping-pong across tool types (goto vs new_tab to the same url)', async () => {
@@ -544,7 +637,7 @@ describe('workspace tools', () => {
     const chat = vi
       .fn()
       .mockResolvedValueOnce(reply('', [toolCall('exec', { cmd: 'ls' })]))
-      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'gave up on files' })]));
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'done what was possible without workspace tools' })]));
     const result = await runTask('list files', deps({ chat }));
     expect(result.steps[0]).toMatchObject({ ok: false });
     expect(result.steps[0]!.detail).toContain('workspace tools unavailable');
@@ -656,7 +749,7 @@ describe('P2: plan + re-investigation + resume', () => {
     const result = await runTask('do the thing', deps({ chat }));
 
     expect(result.status).toBe('done');
-    expect(result.summary).toBe('recovered');
+    expect(result.summary).toContain('recovered');
     const resumeContext = (chat.mock.calls[2]![0] as import('../llm/chatClient').ChatMessage[]).map((m) => m.content ?? '').join('\n');
     expect(resumeContext).toContain('RESUME INSTRUCTION: try the second site instead');
   });
@@ -734,6 +827,18 @@ describe('exec spiral guard + rolling exec memory', () => {
     const { plane, ...rest } = over;
     return deps({ ...rest, workspace: { plane: plane ?? fakePlane(), root: '/tmp/robots' } });
   }
+
+  it('blocks a command after three identical consecutive failures', async () => {
+    const plane = fakePlane({ exec: async (cmd: string) => (cmd.includes('mkdir') ? { code: 0, output: 'made', timedOut: false, durationMs: 3 } : { code: 23, output: 'curl: (23) Failed writing received data', timedOut: false, durationMs: 3 }) });
+    let n = 0;
+    const chat = vi.fn(async () => {
+      n++;
+      if (n <= 5) return reply('', [toolCall('exec', { cmd: 'curl -s http://x.dev -o scratch/posts.json' })]);
+      return reply('', [toolCall('exec', { cmd: 'mkdir -p scratch' })]);
+    });
+    const result = await runTask('fetch it', wsDepsLocal({ chat, plane }));
+    expect(result.steps.some((s) => !s.ok && s.detail.includes('identical failing command'))).toBe(true);
+  });
 
   it('nudges at 20 ops on one file and blocks exec touching it at 35', async () => {
     const plane = fakePlane();

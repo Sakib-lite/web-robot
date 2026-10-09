@@ -71,6 +71,15 @@ describe('taskContext', () => {
     expect(context).toContain('[latest] page 2 repos:');
     expect(context).toContain('B'.repeat(300));
   });
+
+  it('caps notes at thirty with an omission marker', () => {
+    const notes = Array.from({ length: 45 }, (_, i) => `finding ${i + 1}`);
+    const context = taskContext('t', [], [], [], notes);
+    expect(context).toContain('first 15 older notes omitted');
+    expect(context).toContain('16. finding 16');
+    expect(context).toContain('45. finding 45');
+    expect(context).not.toContain('finding 1\n');
+  });
 });
 
 describe('observationBlock', () => {
@@ -85,5 +94,25 @@ describe('observationBlock', () => {
 
   it('reports a missing page instead of crashing', () => {
     expect(observationBlock([], null)).toContain('no accessible page');
+  });
+
+  it('announces the next snapshot page when elements are windowed', () => {
+    const paged = { ...snapshot, elementStart: 80, elementTotal: 200, elementsTruncated: true };
+    const block = observationBlock([], paged);
+    expect(block).toContain('showing 81-');
+    expect(block).toContain('of 200');
+    expect(block).toContain('snapshot with skip=');
+  });
+
+  it('directs the model back to a smaller skip past the end of the list', () => {
+    const empty = { ...snapshot, elements: [], elementStart: 500, elementTotal: 200, elementsTruncated: false };
+    const block = observationBlock([], empty);
+    expect(block).toContain('0 shown');
+    expect(block).toContain('smaller skip');
+  });
+
+  it('says all elements are shown when nothing is cut off', () => {
+    const full = { ...snapshot, elementStart: 0, elementTotal: 2, elementsTruncated: false };
+    expect(observationBlock([], full)).toContain('elements (all 2 shown)');
   });
 });

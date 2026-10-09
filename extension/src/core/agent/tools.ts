@@ -4,7 +4,7 @@ import type { Action } from '../driver/types';
 
 export type AgentCall =
   | { kind: 'action'; action: Action }
-  | { kind: 'observe' }
+  | { kind: 'observe'; skip?: number }
   | { kind: 'note'; text: string }
   | { kind: 'local'; call: LocalCall }
   | { kind: 'plan'; items: Array<{ text: string; done?: boolean }> }
@@ -61,7 +61,7 @@ export const toolSpecs = {
   extract: { description: 'Read targeted information from the page. Returns the main content text; use it after each page of a listing task.', schema: z.object({ goal: z.string() }) },
   wait: { description: 'Wait before the next observation, at most 5000 ms.', schema: z.object({ ms: z.number().int().min(0).max(5000) }) },
   note: { description: 'Record a durable finding or plan update (e.g. "UIC: PTE 54 verified at mscs.uic.edu"). Notes stay visible for the rest of the task - use them as your working memory.', schema: z.object({ text: z.string() }) },
-  snapshot: { description: 'Re-read the current page observation (tabs + elements).', schema: z.object({}) },
+  snapshot: { description: 'Re-read the current page observation. Use skip to page through a long element list: if the header says "showing 1-80 of 200", call with skip=80 for the next page; refs from other pages stay clickable.', schema: z.object({ skip: z.number().int().min(0).optional() }) },
   ask_user: { description: 'Ask the user a question when blocked, or to confirm an irreversible action.', schema: z.object({ question: z.string() }) },
   done: { description: 'Finish the task with a summary written in markdown (use - bullets for lists, 1. numbering for ordered items, **bold** for key facts) and optional extracted data.', schema: z.object({ summary: z.string(), data: z.unknown().optional() }) },
   fail: { description: 'Give up on the task and explain why.', schema: z.object({ reason: z.string() }) },
@@ -94,10 +94,31 @@ function jsonSchema(schema: z.ZodType): Record<string, unknown> {
   return parsed;
 }
 
+const PLAN_TEXT_KEYS = ['text', 'step', 'name', 'title', 'description', 'item', 'label', 'task', 'milestone', 'content', 'message', 'summary', 'plan'] as const;
+
+export function normalizePlanArgs(args: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(args.items)) return args;
+  const items = args.items
+    .map((item) => {
+      if (typeof item === 'string') return { text: item };
+      if (item && typeof item === 'object') {
+        const rec = item as Record<string, unknown>;
+        if (typeof rec.text === 'string' && rec.text.trim()) return rec;
+        const keyed = PLAN_TEXT_KEYS.map((k) => rec[k]).find((v) => typeof v === 'string' && v.trim());
+        if (typeof keyed === 'string') return { ...rec, text: keyed };
+        const anyString = Object.values(rec).find((v) => typeof v === 'string' && v.trim());
+        if (typeof anyString === 'string') return { ...rec, text: anyString };
+      }
+      return null;
+    })
+    .filter((it): it is { text: string } => it !== null);
+  return { ...args, items };
+}
+
 export function parseCall(name: string, args: Record<string, unknown>): { ok: true; call: AgentCall } | { ok: false; error: string } {
   const spec = (toolSpecs as Record<string, ToolSpec | undefined>)[name];
   if (!spec) return { ok: false, error: `unknown tool: ${name}` };
-  const validated = spec.schema.safeParse(args);
+  const validated = spec.schema.safeParse(name === 'update_plan' ? normalizePlanArgs(args) : args);
   if (!validated.success) return { ok: false, error: `invalid arguments for ${name}: ${validated.error.message}` };
 
   const a = validated.data as Record<string, unknown>;
@@ -131,7 +152,7 @@ export function parseCall(name: string, args: Record<string, unknown>): { ok: tr
     case 'extract':
       return { ok: true, call: { kind: 'action', action: { type: 'extract', goal: String(a.goal) } } };
     case 'snapshot':
-      return { ok: true, call: { kind: 'observe' } };
+      return { ok: true, call: { kind: 'observe', ...(a.skip !== undefined ? { skip: Number(a.skip) } : {}) } };
     case 'list_dir':
       return { ok: true, call: { kind: 'local', call: { op: 'list_dir', ...(a.path !== undefined ? { path: String(a.path) } : {}) } } };
     case 'read_file':

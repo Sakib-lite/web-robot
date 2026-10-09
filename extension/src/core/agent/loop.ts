@@ -43,7 +43,7 @@ export interface LoopDeps {
   cleanupTabs?: boolean;
 }
 
-const DEFAULT_MAX_STEPS = 100;
+const DEFAULT_MAX_STEPS = 150;
 const LOOP_NUDGE_AT = 3;
 const LOOP_BLOCK_AT = 5;
 const STALL_LIMIT = 6;
@@ -139,6 +139,7 @@ function actionKey(action: Action, snapshot: Snapshot | null): string {
         snapshot.url,
         snapshot.title,
         snapshot.text.slice(0, 1500),
+        snapshot.text.length,
         snapshot.elements.map((el) => `${el.ref}:${el.expanded ?? ''}:${el.value ?? ''}`).join(','),
       ].join('|')
     : 'none';
@@ -184,6 +185,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   const userAnswers: string[] = [];
   const extracts: Array<{ goal: string; text: string }> = [];
   const agentNotes: string[] = [];
+  const seenPageStates = new Set<string>();
   const repeatCounts = new Map<string, number>();
   const blockedKeys = new Set<string>();
   const readLedger = new Set<string>();
@@ -200,6 +202,14 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   const ownedTabs = new Map<number, string>();
   let reinvestigations = 0;
   let consecutiveBlocked = 0;
+  let stallGrace: number | null = null;
+  let elementSkip = 0;
+  let defeatBounces = 0;
+  let planLoopStrikes = 0;
+  let planLoopGrace = false;
+  let execFailCmd = '';
+  let execFailStreak = 0;
+  const blockedExecCmds = new Set<string>();
   let notes: string[] = [];
   let noToolStrikes = 0;
   let index = 0;
@@ -339,7 +349,8 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     let snapshot: Snapshot | null = null;
     try {
       tabs = await deps.driver.tabs();
-      snapshot = await deps.driver.snapshot();
+      snapshot = await deps.driver.snapshot(elementSkip);
+      if (snapshot?.text) seenPageStates.add(snapshot.text.slice(0, 500));
     } catch {
     }
     await deps.telemetry?.observe(index + 1, {
@@ -435,6 +446,18 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
 
     const agentCall = parsed.call;
     if (agentCall.kind === 'done') {
+      const defeatist = /incomplete|unable|couldn't|could not|cannot be completed|can't be completed|gave up|not fully|hardly|barely|no (?:data|results|details|findings) (?:were )?(?:collected|extracted|found)|did not succeed|without success|no effect/i.test(agentCall.summary);
+      if (defeatist && filesTouched.size === 0 && defeatBounces < 2) {
+        defeatBounces++;
+        record(false, 'done', 'bounced: claims incompleteness without having produced anything');
+        notes.push(
+          defeatBounces === 1
+            ? 'Your done call claims the task is incomplete but you have produced nothing (no files, no notes-backed findings). Do the work instead: page through the element list with snapshot(skip=...), click/extract item by item, and append each verified batch to your deliverable file. Only call done when finished, or fail with the real blocker.'
+            : 'Second defeatist done. You must NOT call done while the task is incomplete and nothing was produced. Either continue working (extract per row, append_file batches) or call fail with the exact blocker that stops you. A bare "could not interact" claim is not a blocker - name the specific page element or error.',
+        );
+        index++;
+        continue;
+      }
       let summary = agentCall.summary;
       if (filesTouched.size > 0) {
         const root = deps.workspace?.root;
@@ -444,6 +467,8 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
           .join('\n');
         if (list) summary = `${summary}\n\n**Files:**\n${list}`;
       }
+      const coverage = `\n\n**Coverage:** ${seenPageStates.size} distinct page states observed over ${steps.length} steps.`;
+      summary = `${summary}${coverage}`;
       return { status: 'done', summary, ...(agentCall.data !== undefined ? { data: agentCall.data } : {}), steps };
     }
     if (agentCall.kind === 'fail') {
@@ -465,7 +490,8 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       continue;
     }
     if (agentCall.kind === 'observe') {
-      record(true, call.name, 'fresh observation taken');
+      if (agentCall.skip !== undefined) elementSkip = agentCall.skip;
+      record(true, call.name, agentCall.skip !== undefined ? `observation window from element ${elementSkip + 1}` : 'fresh observation taken');
       index++;
       continue;
     }
@@ -476,11 +502,28 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       index++;
       continue;
     }
+    if (agentCall.kind !== 'plan') planLoopStrikes = 0;
     if (agentCall.kind === 'plan') {
-      plan = agentCall.items.map((item) => ({ text: item.text, done: item.done === true }));
+      const next = agentCall.items.map((item) => ({ text: item.text, done: item.done === true }));
+      const changed = plan === null || JSON.stringify(next) !== JSON.stringify(plan);
+      planLoopStrikes++;
+      plan = next;
       await persistPlan();
       const done = plan.filter((p) => p.done).length;
-      record(true, 'update_plan', `${done}/${plan.length} milestones done`);
+      record(changed, 'update_plan', changed ? `${done}/${plan.length} milestones done` : 'plan unchanged - no progress');
+      if (planLoopStrikes === 3) {
+        notes.push('You keep rewriting the plan instead of working. The plan is good enough - EXECUTE it now: take the next unchecked milestone with real actions (goto, click, extract, note, file tools). Do not call update_plan again until a milestone actually completes.');
+      }
+      if (planLoopStrikes >= 6) {
+        if (!planLoopGrace) {
+          planLoopGrace = true;
+          planLoopStrikes = 0;
+          maxSteps += 10;
+          notes.push('FINAL WARNING: you have rewritten the plan many times and done NOTHING else. update_plan is now ignored. Your very next call must be a real action for the first unchecked milestone (goto the site, snapshot, extract, click, write_file) - anything else fails the task.');
+          continue;
+        }
+        return { status: 'failed', reason: `stalled: ${planLoopStrikes} consecutive update_plan calls with no real action in between`, steps };
+      }
       index++;
       continue;
     }
@@ -491,12 +534,28 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
         continue;
       }
       const guard = execSpiralGuard(agentCall.call, execCount, fileOps, notes);
-      if (guard === 'blocked') {
-        record(false, describeLocal(agentCall.call), 'blocked: exec spiral guard - too many commands against the same target');
+      const cmdBlocked = agentCall.call.op === 'exec' && blockedExecCmds.has(agentCall.call.cmd);
+      if (guard === 'blocked' || cmdBlocked) {
+        record(false, describeLocal(agentCall.call), cmdBlocked ? 'blocked: repeated identical failing command - change the approach' : 'blocked: exec spiral guard - too many commands against the same target');
         index++;
         continue;
       }
       const outcome = await runLocal(agentCall.call, deps.workspace.plane, readLedger, taskDir);
+      if (agentCall.call.op === 'exec') {
+        if (outcome.ok) {
+          execFailCmd = '';
+          execFailStreak = 0;
+        } else if (agentCall.call.cmd === execFailCmd) {
+          execFailStreak++;
+          if (execFailStreak >= 3 && !blockedExecCmds.has(agentCall.call.cmd)) {
+            blockedExecCmds.add(agentCall.call.cmd);
+            notes.push('That exact command failed 3 times in a row with the same error and is now blocked - it will never succeed as written. Read the error text and CHANGE the approach: create missing directories first, fix the path or url, or pipe into an existing location.');
+          }
+        } else {
+          execFailCmd = agentCall.call.cmd;
+          execFailStreak = 1;
+        }
+      }
       if (outcome.ok && outcome.path) filesTouched.set(outcome.path, agentCall.call.op);
       if (outcome.ok && agentCall.call.op === 'exec' && outcome.text) {
         const digest = outcome.text.replace(/\s+/g, ' ').slice(0, 90);
@@ -536,6 +595,9 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       notes.push('That exact action is blocked on this unchanged page (it did nothing last time). Pick a different element, scroll, extract, or continue with the rest of the task elsewhere.');
       index++;
       if (consecutiveBlocked >= STALL_LIMIT) {
+        if (stallGrace !== null) {
+          return { status: 'failed', reason: `stalled: still picking no-op actions after the partial-results instruction (grace steps used)`, steps };
+        }
         const verdict = await reinvestigate(`stalled: ${consecutiveBlocked} consecutive chosen actions were blocked no-ops`);
         if ('resume' in verdict) {
           consecutiveBlocked = 0;
@@ -543,7 +605,16 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
           notes.push(`The run stalled on no-op actions, but re-investigation found a path forward. RESUME INSTRUCTION: ${verdict.resume}`);
           continue;
         }
-        return { status: 'failed', reason: `stalled: ${consecutiveBlocked} consecutive chosen actions are all blocked no-ops`, steps };
+        stallGrace = 5;
+        consecutiveBlocked = 0;
+        notes.push('You are repeating actions that change nothing. STOP retrying. Call done NOW with a partial summary: what you found, which files you wrote (with paths), and what stayed blocked and why. A partial result beats failing - do not attempt more page actions on this target.');
+        continue;
+      }
+      if (stallGrace !== null) {
+        stallGrace -= 1;
+        if (stallGrace <= 0) {
+          return { status: 'failed', reason: 'stalled: partial-results grace steps exhausted without calling done', steps };
+        }
       }
       continue;
     }
@@ -551,7 +622,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     const seen = (repeatCounts.get(key) ?? 0) + 1;
     repeatCounts.set(key, seen);
     if (seen === LOOP_NUDGE_AT) {
-      notes.push('The last actions changed nothing on the page. The element may be a no-op - pick a different element, scroll, or use extract to read more of the page.');
+      notes.push('The last actions changed nothing on the page. The element may be a no-op - pick a different element, scroll, or use extract to read more of the page. List items often render as several elements (a checkbox or small buttons inside a container): clicking the checkbox does not open the item - click the CONTAINER whose name is the item\'s title instead.');
     }
     if (seen >= LOOP_BLOCK_AT) {
       blockedKeys.add(key);
@@ -581,6 +652,9 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       }
     }
     if (action.type === 'close_tab' && result.ok) ownedTabs.delete(action.tabId);
+    if (result.ok && (action.type === 'goto' || action.type === 'new_tab' || action.type === 'switch_tab')) {
+      elementSkip = 0;
+    }
     await deps.telemetry?.action(index + 1, {
       tool: action.type,
       args: action,
