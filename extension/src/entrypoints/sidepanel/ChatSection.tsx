@@ -4,6 +4,7 @@ export interface RecentTask {
   id: number;
   taskText: string;
   status: string;
+  steps?: string[];
 }
 
 export function ChatSection({

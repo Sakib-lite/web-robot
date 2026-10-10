@@ -89,7 +89,7 @@ web-robot is a **four-layer pipeline**. The LLM never touches a browser directly
 | One action per cycle, then re-observe | The classic agent failure mode is acting twice on stale state. After every action the loop takes a fresh observation, and the next decision is made from evidence. |
 | Snapshot-first, text from `<main>` | The model needs the page's actual content, not the surrounding nav noise. Elements come from the DOM; page text comes from `main`/`[role=main]`/`article` first, so a 4000-char budget contains real content. |
 | Short op budget + loop detection | Fail fast, then re-observe and rebuild — never retry the same thing blindly. URLs are normalized (`?a=1&b=2` ≡ `?b=2&a=1`) so pagination ping-pong is caught within repeats, not after 15 steps. |
-| Danger gate in code, not prompt | Clicks on submit/pay/delete-style buttons pause for user confirmation. A page that tries to talk the model into submitting cannot bypass it — the gate is enforced by the loop, outside the model's reach. |
+| Danger gate in code, not in prompt | Clicks on submit/pay/delete-style buttons pause for user confirmation. A page that tries to talk the model into submitting cannot bypass it — the gate is enforced by the loop, outside the model's reach. |
 
 ## The agent loop
 

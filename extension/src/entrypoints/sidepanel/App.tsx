@@ -7,7 +7,7 @@ import { getBackendUrl } from '@/core/telemetry/settings';
 
 export default function App() {
   const [view, setView] = useState<'task' | 'settings'>('task');
-  const { store, configs, refresh } = useProviders();
+  const { store, configs, customModels, refresh } = useProviders();
   const [remoteState, setRemoteState] = useState('idle');
   const [backendError, setBackendError] = useState<string | null>(null);
   const [manualRun, setManualRun] = useState<RunState | null>(null);
@@ -128,9 +128,9 @@ export default function App() {
       </header>
       {remoteState !== 'idle' && !remoteRunning && <div className="note ok small">{remoteState}</div>}
       {view === 'task' ? (
-        <TaskRunner store={store} configs={configs} onRunningChange={setManualRun} />
+        <TaskRunner store={store} configs={configs} customModels={customModels} onRunningChange={setManualRun} />
       ) : (
-        <SettingsView store={store} configs={configs} refresh={refresh} />
+        <SettingsView store={store} configs={configs} customModels={customModels} refresh={refresh} />
       )}
       {backendError && (
         <footer className="muted small backend-state">

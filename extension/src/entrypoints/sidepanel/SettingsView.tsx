@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { chatCompletion } from '@/core/llm/chatClient';
 import { Chevron, Collapse } from './common/ui';
-import { allProducts, type Effort, type ProductId } from '@/core/llm/products';
+import { allProducts, catalogModels, type Effort, type ProductId } from '@/core/llm/products';
 import type { LlmProvider, ProductStore, StoredProductConfig } from '@/core/llm/providers';
 import { syncConfigToBackend } from '@/core/llm/providers';
 import { DEFAULT_BACKEND_URL, getBackendUrl, isRemoteWorkerEnabled, saveBackendUrl, saveRemoteWorkerEnabled } from '@/core/telemetry/settings';
@@ -58,8 +58,19 @@ function Switch({ checked, onChange, label }: { checked: boolean; onChange: (nex
   );
 }
 
-export default function SettingsView({ store, configs, refresh }: { store: ProductStore; configs: StoredProductConfig[] | null; refresh: () => Promise<void> }) {
+export default function SettingsView({
+  store,
+  configs,
+  customModels,
+  refresh,
+}: {
+  store: ProductStore;
+  configs: StoredProductConfig[] | null;
+  customModels: Partial<Record<ProductId, string[]>>;
+  refresh: () => Promise<void>;
+}) {
   const [cards, setCards] = useState<Record<ProductId, CardState>>(EMPTY);
+  const [drafts, setDrafts] = useState<Partial<Record<ProductId, string>>>({});
   const [testState, setTestState] = useState<TestState>(null);
   const [testing, setTesting] = useState(false);
   const [backend, setBackend] = useState(DEFAULT_BACKEND_URL);
@@ -112,6 +123,24 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
     setCards((prev) => ({ ...prev, [productId]: { ...prev[productId]!, ...patch } }));
   }
 
+  async function addModel(productId: ProductId) {
+    const value = (drafts[productId] ?? '').trim();
+    if (!value) return;
+    try {
+      await store.addCustomModel(productId, value);
+      setDrafts((prev) => ({ ...prev, [productId]: '' }));
+      setTestState({ productId, ok: true, message: `added ${value}` });
+      await refresh();
+    } catch (error) {
+      setTestState({ productId, ok: false, message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  async function removeModel(productId: ProductId, model: string) {
+    await store.removeCustomModel(productId, model);
+    await refresh();
+  }
+
   async function pasteKey(productId: ProductId) {
     try {
       const text = await navigator.clipboard.readText();
@@ -126,9 +155,9 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
     }
   }
 
-  async function save(productId: ProductId) {
+  async function save(productId: ProductId, modelOverride?: string) {
     const product = allProducts().find((p) => p.id === productId)!;
-    const card = cards[productId];
+    const card = modelOverride ? { ...cards[productId]!, model: modelOverride } : cards[productId]!;
     const existing = configs?.find((c) => c.productId === productId);
     try {
       const saved = await store.save({
@@ -239,11 +268,55 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
                   placeholder={product.defaults.model}
                 />
                 <datalist id={`${product.id}-models`}>
-                  {(product.models ?? [product.defaults.model]).map((model) => (
+                  {catalogModels(product, customModels[product.id] ?? []).map((model) => (
                     <option key={model} value={model} />
                   ))}
                 </datalist>
               </label>
+              <div className="row">
+                <input
+                  value={drafts[product.id] ?? ''}
+                  onChange={(e) => setDrafts((prev) => ({ ...prev, [product.id]: e.target.value }))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void addModel(product.id);
+                  }}
+                  placeholder="add a model id (e.g. gemma4:26b)"
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+                <button disabled={!(drafts[product.id] ?? '').trim()} onClick={() => void addModel(product.id)}>
+                  add
+                </button>
+              </div>
+              {(customModels[product.id] ?? []).length > 0 && (
+                <div className="presets">
+                  {(customModels[product.id] ?? []).map((model) => (
+                    <span
+                      key={model}
+                      className="chip"
+                      title="make this the model"
+                      onClick={() => {
+                        edit(product.id, { model });
+                        void save(product.id, model);
+                      }}
+                    >
+                      {model}
+                      <button
+                        type="button"
+                        className="chip-x"
+                        title="remove this model"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void removeModel(product.id, model);
+                        }}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <p className="muted small">click a model to make it the default</p>
               {product.efforts && (
                 <label>
                   effort

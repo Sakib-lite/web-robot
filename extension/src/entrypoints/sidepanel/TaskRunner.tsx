@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { runTask, type StepRecord, type TaskResult } from '@/core/agent/loop';
+import { planTask } from '@/core/agent/planner';
 import { createExtensionDriver } from '@/core/driver/extensionDriver';
 import { createHttpPlane } from '@/core/local/httpPlane';
 import { chatCompletion, type ChatMessage, type ChatResponse, type ToolDef } from '@/core/llm/chatClient';
-import { resolveActiveProvider, type ProductStore, type StoredProductConfig } from '@/core/llm/providers';
-import { getProduct, type Effort } from '@/core/llm/products';
+import { resolveActiveProvider, type LlmProvider, type ProductStore, type StoredProductConfig } from '@/core/llm/providers';
+import { getProduct, catalogModels, type Effort, type ProductId } from '@/core/llm/products';
 import { getBackendUrl } from '@/core/telemetry/settings';
 import { Chevron, Collapse } from './common/ui';
 import { StepsEditor } from './StepsEditor';
-import { ChatSection } from './ChatSection';
+import { ChatSection, type RecentTask } from './ChatSection';
 import { startTelemetry } from '@/core/telemetry/client';
 import ResultView from './ResultView';
 
@@ -26,10 +27,12 @@ export interface RunState {
 export default function TaskRunner({
   store,
   configs,
+  customModels,
   onRunningChange,
 }: {
   store: ProductStore;
   configs: StoredProductConfig[] | null;
+  customModels: Partial<Record<ProductId, string[]>>;
   onRunningChange: (state: RunState | null) => void;
 }) {
   const [task, setTask] = useState('');
@@ -44,10 +47,11 @@ export default function TaskRunner({
   const [chatState, setChatState] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [inputOpen, setInputOpen] = useState(true);
-  const [recentTasks, setRecentTasks] = useState<Array<{ id: number; taskText: string; status: string }>>([]);
+  const [recentTasks, setRecentTasks] = useState<RecentTask[]>([]);
   const [model, setModel] = useState('');
   const [effort, setEffort] = useState('');
   const [running, setRunning] = useState(false);
+  const [planning, setPlanning] = useState(false);
   const [steps, setSteps] = useState<StepRecord[]>([]);
   const [result, setResult] = useState<TaskResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +63,11 @@ export default function TaskRunner({
     const active = configs?.find((c) => c.active);
     return active ? getProduct(active.productId) : null;
   }, [configs]);
-  const modelOptions = activeProduct?.models ?? [];
+  const modelOptions = useMemo(() => {
+    if (!activeProduct) return [];
+    const saved = configs?.find((c) => c.active)?.model ?? '';
+    return catalogModels(activeProduct, [...(saved ? [saved] : []), ...(customModels[activeProduct.id] ?? [])]);
+  }, [activeProduct, configs, customModels]);
   const effortOptions = activeProduct?.efforts ?? [];
 
   useEffect(() => {
@@ -74,7 +82,7 @@ export default function TaskRunner({
         if (skillsRes.ok) setSkills(((await skillsRes.json()) as { skills?: SkillOption[] }).skills ?? []);
         if (contextsRes.ok) setContexts(((await contextsRes.json()) as { contexts?: Array<{ slug: string; bytes: number }> }).contexts ?? []);
         if (tasksRes.ok) {
-          const body = (await tasksRes.json()) as Array<{ id: number; taskText: string; status: string }>;
+          const body = (await tasksRes.json()) as RecentTask[];
           setRecentTasks(Array.isArray(body) ? body : []);
           const finished = Array.isArray(body) ? body.find((t) => t.status !== 'queued' && t.status !== 'running') : undefined;
           if (finished) setChatTaskId(finished.id);
@@ -92,26 +100,20 @@ export default function TaskRunner({
 
     const askUser = async (question: string) => window.prompt(`web-robot asks:\n${question}`);
 
-    const backendUrl = await getBackendUrl();
-
-    const provider = await resolveActiveProvider(store, undefined, { url: backendUrl });
-    if (!provider) {
-      setError('no active llm provider - add one in settings first');
-      return;
-    }
+    const resolved = await resolveProvider();
+    if (!resolved) return;
+    const { backendUrl } = resolved;
+    let runProvider = resolved.provider;
 
     setRunning(true);
     onRunningChange({ stepCount: 0, snippet: task.slice(0, 60) });
     const controller = new AbortController();
     abortRef.current = controller;
 
-    let runProvider = provider;
-    if (model) runProvider = { ...runProvider, model };
-    if (effort) runProvider = { ...runProvider, thinking: effort as Effort };
     setUsingProvider(`${runProvider.productId} · ${runProvider.model} · ${runProvider.thinking ?? 'off'}`);
 
     const telemetry = await startTelemetry(
-      { taskText: task, product: runProvider.productId, model: runProvider.model, effort: runProvider.thinking ?? 'off' },
+      { taskText: task, product: runProvider.productId, model: runProvider.model, effort: runProvider.thinking ?? 'off', ...(effectiveSteps.length ? { steps: effectiveSteps } : {}) },
       backendUrl,
     );
     if (telemetry.taskId) setTraceInfo({ taskId: telemetry.taskId, backendUrl });
@@ -204,7 +206,7 @@ export default function TaskRunner({
         try {
           const res = await fetch(`${backendUrl}/tasks?limit=12`);
           if (res.ok) {
-            const body = (await res.json()) as Array<{ id: number; taskText: string; status: string }>;
+            const body = (await res.json()) as RecentTask[];
             if (Array.isArray(body)) setRecentTasks(body);
           }
         } catch {
@@ -217,6 +219,47 @@ export default function TaskRunner({
     abortRef.current?.abort();
   }
 
+  async function resolveProvider(): Promise<{ backendUrl: string; provider: LlmProvider } | null> {
+    const backendUrl = await getBackendUrl();
+    const provider = await resolveActiveProvider(store, undefined, { url: backendUrl });
+    if (!provider) {
+      setError('no active llm provider - add one in settings first');
+      return null;
+    }
+    let effective = provider;
+    if (model) effective = { ...effective, model };
+    if (effort) effective = { ...effective, thinking: effort as Effort };
+    return { backendUrl, provider: effective };
+  }
+
+  async function plan() {
+    setError(null);
+    setResult(null);
+    setSteps([]);
+    const resolved = await resolveProvider();
+    if (!resolved) return;
+    setPlanning(true);
+    onRunningChange({ stepCount: 0, snippet: `planning: ${task.slice(0, 50)}` });
+    try {
+      const plan = await planTask(
+        task.trim(),
+        {
+          driver: createExtensionDriver(),
+          chat: (messages, tools) => chatCompletion(resolved.provider, { messages, tools, maxTokens: 4096 }),
+        },
+        (rec) => setSteps((prev) => [...prev, { index: prev.length + 1, call: rec.call, detail: rec.detail, ok: rec.ok }]),
+      );
+      setStepsMode(true);
+      setTaskSteps(plan);
+      setInputOpen(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPlanning(false);
+      onRunningChange(null);
+    }
+  }
+
   const effectiveSteps = stepsMode ? taskSteps.map((s) => s.trim()).filter(Boolean) : [];
 
   function setStepAt(i: number, value: string) {
@@ -224,6 +267,16 @@ export default function TaskRunner({
   }
   function removeStep(i: number) {
     setTaskSteps((prev) => prev.filter((_, j) => j !== i));
+  }
+
+  function reuseTask(id: number) {
+    const t = recentTasks.find((x) => x.id === id);
+    if (!t) return;
+    setTask(t.taskText.trim());
+    const steps = (t.steps ?? []).map((s) => s.trim()).filter(Boolean);
+    setStepsMode(steps.length > 0);
+    setTaskSteps(steps.length > 0 ? steps : ['']);
+    setInputOpen(true);
   }
 
   async function sendChat() {
@@ -278,6 +331,19 @@ export default function TaskRunner({
       </Collapse>
 
       <div className="config-bar">
+        {recentTasks.length > 0 && (
+          <label className="config" title="reload a recent task's text and steps into the form">
+            <span>reuse</span>
+            <select value="" onChange={(e) => { if (e.target.value) reuseTask(Number(e.target.value)); }} disabled={running}>
+              <option value="">recent…</option>
+              {recentTasks.map((t) => (
+                <option key={t.id} value={t.id}>
+                  #{t.id} · {t.status} · {t.taskText.trim().slice(0, 30)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label className="config" title="split the task into ordered steps the agent executes as its milestone plan - it decides HOW to do each">
           <span>steps</span>
           <select value={stepsMode ? 'steps' : ''} onChange={(e) => { setStepsMode(e.target.value === 'steps'); if (!taskSteps.length) setTaskSteps(['']); }} disabled={running}>
@@ -340,6 +406,9 @@ export default function TaskRunner({
         <div className="run-controls">
           <button className="primary" disabled={running || !task.trim()} onClick={run}>
             run
+          </button>
+          <button disabled={running || planning || !task.trim()} onClick={plan} title="inspect the current browser state first, then propose an editable milestone plan">
+            {planning ? 'planning…' : 'plan'}
           </button>
           <button className="danger" disabled={!running} onClick={stop}>
             stop
