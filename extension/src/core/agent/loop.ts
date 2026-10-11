@@ -93,27 +93,6 @@ function agentNoteDetail(text: string): string {
   return text.length > 90 ? `${text.slice(0, 87)}… (saved to PLAN.md)` : `${text} (saved to PLAN.md)`;
 }
 
-export function parsePlanMd(md: string): { milestones: Array<{ text: string; done: boolean }>; findings: string[] } | null {
-  const milestones: Array<{ text: string; done: boolean }> = [];
-  const findings: string[] = [];
-  let section = '';
-  for (const line of md.split('\n')) {
-    if (line.startsWith('## ')) {
-      section = line.slice(3).trim().toLowerCase();
-      continue;
-    }
-    const milestone = /^- \[([ x])\] (.*)$/.exec(line.trim());
-    if (section === 'milestones' && milestone) {
-      milestones.push({ text: milestone[2]!, done: milestone[1] === 'x' });
-      continue;
-    }
-    const finding = /^- (.+)$/.exec(line.trim());
-    if (section === 'findings' && finding && !milestone) findings.push(finding[1]!);
-  }
-  if (milestones.length === 0 && findings.length === 0) return null;
-  return { milestones, findings };
-}
-
 
 export function isDangerous(action: Action, snapshot: Snapshot | null): string | null {
   if (action.type !== 'click') return null;
@@ -193,20 +172,11 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   const execCount = { total: 0 };
   const fileOps = new Map<string, number>();
   let execDigests: string[] = [];
-  let plan: Array<{ text: string; done: boolean }> | null = null;
-  const planFindings: string[] = [];
-  let planFileInit = false;
   const taskDir = deps.taskId != null ? `.web-robot/tasks/${deps.taskId}` : null;
   const filesTouched = new Map<string, string>();
-  const planPath = taskDir ? `${taskDir}/PLAN.md` : null;
   const ownedTabs = new Map<number, string>();
-  let reinvestigations = 0;
   let consecutiveBlocked = 0;
-  let stallGrace: number | null = null;
   let elementSkip = 0;
-  let defeatBounces = 0;
-  let planLoopStrikes = 0;
-  let planLoopGrace = false;
   let execFailCmd = '';
   let execFailStreak = 0;
   const blockedExecCmds = new Set<string>();
@@ -214,111 +184,11 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   let noToolStrikes = 0;
   let index = 0;
 
-  async function persistPlan() {
-    if (!deps.workspace || !planPath) return;
-    const md = [
-      `# ${task.slice(0, 120)}`,
-      '',
-      '## Milestones',
-      ...(plan ?? []).map((p) => `${p.done ? '- [x]' : '- [ ]'} ${p.text}`),
-      '',
-      '## Findings',
-      ...planFindings.map((f) => `- ${f}`),
-      '',
-    ].join('\n');
-    try {
-      await deps.workspace.plane.write(planPath, md);
-      planFileInit = true;
-    } catch {
-    }
-  }
-
-  async function persistFinding(text: string) {
-    if (!deps.workspace || !planPath) return;
-    if (!planFileInit) {
-      await persistPlan();
-      planFindings.push(text);
-      await persistPlan();
-      return;
-    }
-    planFindings.push(text);
-    try {
-      await deps.workspace.plane.append(planPath, `- ${text}\n`);
-    } catch {
-    }
-  }
-
-  if (deps.workspace && planPath) {
-    try {
-      const slice = await deps.workspace.plane.read(planPath, 1, 400);
-      const parsed = parsePlanMd(slice.lines.map((l) => l.text).join('\n'));
-      if (parsed) {
-        plan = parsed.milestones;
-        planFindings.push(...parsed.findings);
-        planFileInit = true;
-        agentNotes.push(...parsed.findings);
-        notes.push(
-          'This run was interrupted and has RESUMED. The milestone plan and findings above are your earlier verified progress: continue from the first unchecked milestone and do NOT redo completed work.',
-        );
-      }
-    } catch {
-    }
-  }
-  if (deps.steps && deps.steps.length > 0 && !plan) {
-    plan = deps.steps.map((text, i) => ({ text: `STEP ${i + 1}: ${text}`, done: false }));
-    await persistPlan();
-  }
-
   function record(ok: boolean, call: string, detail: string) {
     const step: StepRecord = { index: index + 1, call, detail, ok };
     steps.push(step);
     stepLines.push(ok ? `${step.call} → ${detail}` : `${step.call} → failed: ${detail}`);
     deps.onStep?.(step);
-  }
-
-  async function reinvestigate(reason: string): Promise<{ resume: string } | { giveUp: true }> {
-    if (reinvestigations >= 2) return { giveUp: true };
-    reinvestigations++;
-    const context = [
-      `TASK:\n${task}`,
-      plan && plan.length > 0 ? `PLAN:\n${plan.map((p) => `${p.done ? '[x]' : '[ ]'} ${p.text}`).join('\n')}` : '',
-      `STEPS SO FAR (last 15):\n${stepLines.slice(-15).join('\n')}`,
-      `FAILURE:\n${reason}`,
-    ]
-      .filter(Boolean)
-      .join('\n\n');
-    const verdictTools: ToolDef[] = [
-      {
-        name: 'resume',
-        description: 'Continue the task from where it failed with a concrete next instruction.',
-        parameters: { type: 'object', properties: { next_instruction: { type: 'string' } }, required: ['next_instruction'] },
-      },
-      {
-        name: 'confirm_fail',
-        description: 'The task is genuinely impossible; finalize it as failed.',
-        parameters: { type: 'object', properties: { reason: { type: 'string' } }, required: ['reason'] },
-      },
-    ];
-    try {
-      const res = await deps.chat(
-        [
-          {
-            role: 'system',
-            content:
-              'A web-robot run just failed. Decide: resume it with a concrete next instruction, or confirm the failure. Prefer resume whenever any progress or any remaining path exists - partial results beat giving up. ',
-          },
-          { role: 'user', content: context },
-        ],
-        verdictTools,
-      );
-      const call = res.toolCalls[0];
-      if (call?.name === 'resume' && typeof call.args.next_instruction === 'string' && call.args.next_instruction.trim()) {
-        return { resume: call.args.next_instruction.trim().slice(0, 400) };
-      }
-      return { giveUp: true };
-    } catch {
-      return { giveUp: true };
-    }
   }
 
   async function cleanupOwnedTabs() {
@@ -336,13 +206,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   while (true) {
     if (deps.signal?.aborted) return { status: 'stopped', reason: 'cancelled by user', steps };
     if (index >= maxSteps) {
-      const verdict = await reinvestigate(`step limit of ${maxSteps} reached`);
-      if ('resume' in verdict) {
-        maxSteps += 25;
-        notes.push(`The step limit hit, but re-investigation granted a fresh budget of 25 more steps. RESUME INSTRUCTION: ${verdict.resume}`);
-        continue;
-      }
-      return { status: 'failed', reason: `step limit of ${maxSteps} reached (confirmed by re-investigation)`, steps };
+      return { status: 'failed', reason: `step limit of ${maxSteps} reached`, steps };
     }
 
     let tabs = [] as Awaited<ReturnType<Driver['tabs']>>;
@@ -367,10 +231,10 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       ...(deps.steps?.length
         ? [{
             role: 'system' as const,
-            content: `USER STEPS for this task (execute IN ORDER - they are your milestone plan; check each off with update_plan as you finish it. HOW you accomplish each step is your decision - the steps define WHAT must exist at the end):\n${deps.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}`,
+            content: `USER STEPS (execute in order):\n${deps.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}`,
           }]
         : []),
-      { role: 'user', content: taskContext(task, stepLines, userAnswers, extracts, agentNotes, latestLocal, plan, execDigests) },
+      { role: 'user', content: taskContext(task, stepLines, userAnswers, extracts, agentNotes, latestLocal, execDigests) },
       ...notes.map((content) => ({ role: 'system' as const, content })),
       { role: 'user', content: observationBlock(tabs, snapshot, Object.fromEntries(ownedTabs)) },
     ];
@@ -383,12 +247,6 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
         content: `Only ${remaining} steps left. Consolidate: finish verifying only your most promising remaining targets, then call done with the results you have (partial beats failing).`,
       });
     }
-    if (index + 1 === 20 && agentNotes.length === 0) {
-      messages.push({
-        role: 'system',
-        content: 'You have recorded no findings so far. Call note(text) after every verified fact (target: result + source url) - your notes are how you avoid re-doing work.',
-      });
-    }
 
     let res: ChatResponse;
     const chatStarted = Date.now();
@@ -397,12 +255,6 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       await deps.telemetry?.llm(index + 1, { messages, error: reason, durationMs: Date.now() - chatStarted });
-      const verdict = await reinvestigate(`llm error: ${reason}`);
-      if ('resume' in verdict) {
-        maxSteps += 25;
-        notes.push(`The model call failed once, but re-investigation decided to continue. RESUME INSTRUCTION: ${verdict.resume}`);
-        continue;
-      }
       return { status: 'failed', reason: `llm error: ${reason}`, steps };
     }
     await deps.telemetry?.llm(index + 1, {
@@ -415,16 +267,9 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
 
     if (res.toolCalls.length === 0) {
       const empty = !res.content.trim();
+      const reason = `model stopped calling tools${empty ? ' (empty replies)' : ''}: ${res.content.slice(0, 200)}`;
       noToolStrikes++;
       if (noToolStrikes >= 3) {
-        const reason = `model stopped calling tools${empty ? ' (empty replies)' : ''}: ${res.content.slice(0, 200)}`;
-        const verdict = await reinvestigate(reason);
-        if ('resume' in verdict) {
-          noToolStrikes = 0;
-          maxSteps += 25;
-          notes.push(`The model went silent, but re-investigation decided to continue. RESUME INSTRUCTION: ${verdict.resume}`);
-          continue;
-        }
         return { status: 'failed', reason, steps };
       }
       notes.push(
@@ -446,23 +291,10 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
 
     const agentCall = parsed.call;
     if (agentCall.kind === 'done') {
-      const defeatist = /incomplete|unable|couldn't|could not|cannot be completed|can't be completed|gave up|not fully|hardly|barely|no (?:data|results|details|findings) (?:were )?(?:collected|extracted|found)|did not succeed|without success|no effect/i.test(agentCall.summary);
-      if (defeatist && filesTouched.size === 0 && defeatBounces < 2) {
-        defeatBounces++;
-        record(false, 'done', 'bounced: claims incompleteness without having produced anything');
-        notes.push(
-          defeatBounces === 1
-            ? 'Your done call claims the task is incomplete but you have produced nothing (no files, no notes-backed findings). Do the work instead: page through the element list with snapshot(skip=...), click/extract item by item, and append each verified batch to your deliverable file. Only call done when finished, or fail with the real blocker.'
-            : 'Second defeatist done. You must NOT call done while the task is incomplete and nothing was produced. Either continue working (extract per row, append_file batches) or call fail with the exact blocker that stops you. A bare "could not interact" claim is not a blocker - name the specific page element or error.',
-        );
-        index++;
-        continue;
-      }
       let summary = agentCall.summary;
       if (filesTouched.size > 0) {
         const root = deps.workspace?.root;
         const list = [...filesTouched.keys()]
-          .filter((p) => p !== planPath)
           .map((p) => `- \`${root ? `${root}/${p}` : p}\``)
           .join('\n');
         if (list) summary = `${summary}\n\n**Files:**\n${list}`;
@@ -472,12 +304,6 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       return { status: 'done', summary, ...(agentCall.data !== undefined ? { data: agentCall.data } : {}), steps };
     }
     if (agentCall.kind === 'fail') {
-      const verdict = await reinvestigate(`the model gave up: ${agentCall.reason}`);
-      if ('resume' in verdict) {
-        maxSteps += 25;
-        notes.push(`A give-up verdict was overruled by re-investigation - partial progress exists. RESUME INSTRUCTION: ${verdict.resume}`);
-        continue;
-      }
       return { status: 'failed', reason: agentCall.reason, steps };
     }
     if (agentCall.kind === 'ask_user') {
@@ -497,33 +323,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     }
     if (agentCall.kind === 'note') {
       agentNotes.push(agentCall.text);
-      await persistFinding(agentCall.text);
       record(true, 'note', agentNoteDetail(agentCall.text));
-      index++;
-      continue;
-    }
-    if (agentCall.kind !== 'plan') planLoopStrikes = 0;
-    if (agentCall.kind === 'plan') {
-      const next = agentCall.items.map((item) => ({ text: item.text, done: item.done === true }));
-      const changed = plan === null || JSON.stringify(next) !== JSON.stringify(plan);
-      planLoopStrikes++;
-      plan = next;
-      await persistPlan();
-      const done = plan.filter((p) => p.done).length;
-      record(changed, 'update_plan', changed ? `${done}/${plan.length} milestones done` : 'plan unchanged - no progress');
-      if (planLoopStrikes === 3) {
-        notes.push('You keep rewriting the plan instead of working. The plan is good enough - EXECUTE it now: take the next unchecked milestone with real actions (goto, click, extract, note, file tools). Do not call update_plan again until a milestone actually completes.');
-      }
-      if (planLoopStrikes >= 6) {
-        if (!planLoopGrace) {
-          planLoopGrace = true;
-          planLoopStrikes = 0;
-          maxSteps += 10;
-          notes.push('FINAL WARNING: you have rewritten the plan many times and done NOTHING else. update_plan is now ignored. Your very next call must be a real action for the first unchecked milestone (goto the site, snapshot, extract, click, write_file) - anything else fails the task.');
-          continue;
-        }
-        return { status: 'failed', reason: `stalled: ${planLoopStrikes} consecutive update_plan calls with no real action in between`, steps };
-      }
       index++;
       continue;
     }
@@ -595,26 +395,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       notes.push('That exact action is blocked on this unchanged page (it did nothing last time). Pick a different element, scroll, extract, or continue with the rest of the task elsewhere.');
       index++;
       if (consecutiveBlocked >= STALL_LIMIT) {
-        if (stallGrace !== null) {
-          return { status: 'failed', reason: `stalled: still picking no-op actions after the partial-results instruction (grace steps used)`, steps };
-        }
-        const verdict = await reinvestigate(`stalled: ${consecutiveBlocked} consecutive chosen actions were blocked no-ops`);
-        if ('resume' in verdict) {
-          consecutiveBlocked = 0;
-          maxSteps += 25;
-          notes.push(`The run stalled on no-op actions, but re-investigation found a path forward. RESUME INSTRUCTION: ${verdict.resume}`);
-          continue;
-        }
-        stallGrace = 5;
-        consecutiveBlocked = 0;
-        notes.push('You are repeating actions that change nothing. STOP retrying. Call done NOW with a partial summary: what you found, which files you wrote (with paths), and what stayed blocked and why. A partial result beats failing - do not attempt more page actions on this target.');
-        continue;
-      }
-      if (stallGrace !== null) {
-        stallGrace -= 1;
-        if (stallGrace <= 0) {
-          return { status: 'failed', reason: 'stalled: partial-results grace steps exhausted without calling done', steps };
-        }
+        return { status: 'failed', reason: `stalled: ${consecutiveBlocked} consecutive chosen actions were all blocked no-ops`, steps };
       }
       continue;
     }

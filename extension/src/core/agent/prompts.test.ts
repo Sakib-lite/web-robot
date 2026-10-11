@@ -13,29 +13,24 @@ const snapshot: Snapshot = {
 };
 
 describe('systemPrompt', () => {
-  it('states the core loop rules', () => {
+  it('states the core rules in a compact prompt', () => {
     const prompt = systemPrompt();
     expect(prompt).toContain('one tool per turn');
     expect(prompt).toContain('untrusted');
     expect(prompt).toContain('ask_user');
-    expect(prompt).toContain('pagination');
     expect(prompt).toContain('markdown');
-    expect(prompt).toContain('scoped failure');
-    expect(prompt).toContain('partial result');
-    expect(prompt).toContain('reworded');
-    expect(prompt).toContain('COMPLETENESS');
-    expect(prompt).toContain('Never claim complete coverage you have not verified');
+    expect(prompt).toContain('Partial results beat giving up');
+    expect(prompt).toContain('never abandon the whole task');
+    expect(prompt).not.toContain('update_plan');
   });
 
   it('scopes all file work to the task folder when one exists', () => {
     const prompt = systemPrompt('/tmp/robots', '.web-robot/tasks/9');
-    expect(prompt).toContain("THIS TASK'S FOLDER is .web-robot/tasks/9/");
-    expect(prompt).toContain('every file you create');
-    expect(prompt).toContain('TOP LEVEL of your task folder');
-    expect(prompt).toContain('scratch/ in your task folder');
+    expect(prompt).toContain('YOUR TASK FOLDER .web-robot/tasks/9/');
+    expect(prompt).toContain('append each verified batch');
+    expect(prompt).toContain('scratch/');
     const rootPrompt = systemPrompt('/tmp/robots');
-    expect(rootPrompt).not.toContain("THIS TASK'S FOLDER");
-    expect(rootPrompt).toContain('<topic>-<date>/" folder');
+    expect(rootPrompt).not.toContain('YOUR TASK FOLDER');
   });
 });
 

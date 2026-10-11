@@ -76,21 +76,5 @@ describe('parseCall', () => {
     expect(parseCall('wait', { ms: 9000 }).ok).toBe(false);
   });
 
-  it('normalizes update_plan items sent as plain strings', () => {
-    const res = parseCall('update_plan', { items: ['list unis', { text: 'collect info', done: true }] });
-    expect(res).toEqual({
-      ok: true,
-      call: { kind: 'plan', items: [{ text: 'list unis' }, { text: 'collect info', done: true }] },
-    });
-    expect(parseCall('update_plan', { items: [] }).ok).toBe(false);
-    expect(parseCall('update_plan', { items: 'nope' }).ok).toBe(false);
-  });
 
-  it('rescues plan items sent as objects without a text key', () => {
-    const res = parseCall('update_plan', { items: [{ step: 'list unis in md' }, { name: 'collect info', done: true }, { junk: 1 }] });
-    expect(res).toEqual({
-      ok: true,
-      call: { kind: 'plan', items: [{ text: 'list unis in md' }, { done: true, text: 'collect info' }] },
-    });
-  });
 });
