@@ -43,7 +43,7 @@ export interface LoopDeps {
   cleanupTabs?: boolean;
 }
 
-const DEFAULT_MAX_STEPS = 150;
+const DEFAULT_MAX_STEPS = 400;
 const LOOP_NUDGE_AT = 3;
 const LOOP_BLOCK_AT = 5;
 const STALL_LIMIT = 6;
