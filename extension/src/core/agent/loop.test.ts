@@ -237,7 +237,7 @@ describe('runTask', () => {
     expect(act.mock.calls.filter((c) => (c[0] as Action).type === 'goto' || (c[0] as Action).type === 'new_tab').length).toBe(4);
   });
 
-  it('blocks extract rewording on an unchanged page state', async () => {
+  it('allows different extract goals on an unchanged page, blocks only identical repeats', async () => {
     const goals = ['PTE minimum', 'quote the PTE paragraph', 'find PTE score sentence', 'PTE score listed after TOEFL', 'what PTE score is required'];
     let i = 0;
     const act = vi.fn(async (action: Action) =>
@@ -253,7 +253,25 @@ describe('runTask', () => {
 
     expect(result.status).toBe('failed');
     expect(result.reason).toContain('stalled');
-    expect(act.mock.calls.filter((c) => (c[0] as Action).type === 'extract').length).toBe(4);
+    expect(act.mock.calls.filter((c) => (c[0] as Action).type === 'extract').length).toBe(6);
+  });
+
+  it('caps total extracts on one unchanged page state', async () => {
+    let i = 0;
+    const act = vi.fn(async (action: Action) =>
+      action.type === 'extract' ? { ok: true, detail: 'NOTHING...' } : { ok: true, detail: 'ok' });
+    const driver = fakeDriver({ act });
+    const chat = vi.fn(async () => {
+      i++;
+      return reply('', [toolCall('extract', { goal: `question number ${i}` })]);
+    });
+    const result = await runTask('keep asking', deps({ driver, chat }));
+
+    expect(result.status).toBe('failed');
+    const acted = act.mock.calls.filter((c) => (c[0] as Action).type === 'extract').length;
+    const blocked = result.steps.filter((s) => !s.ok && s.detail.includes('read 6 times')).length;
+    expect(acted).toBe(6);
+    expect(blocked).toBeGreaterThanOrEqual(1);
   });
 
   it('does not count a click as a repeat when the page state actually changed', async () => {

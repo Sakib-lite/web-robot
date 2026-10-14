@@ -126,7 +126,7 @@ function actionKey(action: Action, snapshot: Snapshot | null): string {
   if (action.type === 'goto') return `nav:${normalizeUrlForCompare(action.url)}|${state}`;
   if (action.type === 'new_tab') return `nav:${action.url ? normalizeUrlForCompare(action.url) : 'about:blank'}|${state}`;
   if (action.type === 'switch_tab' || action.type === 'close_tab') return `nav:tab:${action.tabId}|${state}`;
-  if (action.type === 'extract') return `extract|${state}`;
+  if (action.type === 'extract') return `extract|${action.goal.trim().toLowerCase().slice(0, 80)}|${state}`;
   return `${JSON.stringify(action)}|${state}`;
 }
 
@@ -166,6 +166,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   const agentNotes: string[] = [];
   const seenPageStates = new Set<string>();
   const repeatCounts = new Map<string, number>();
+  const extractsOnState = new Map<string, number>();
   const blockedKeys = new Set<string>();
   const readLedger = new Set<string>();
   let latestLocal: { label: string; text: string } | null = null;
@@ -383,6 +384,22 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       if (answer === null) return { status: 'stopped', reason: 'user dismissed the confirmation', steps };
       if (!/^\s*(y|yes|ok|allow)\b/i.test(answer)) {
         record(false, describeAction(action), `user declined ${danger}`);
+        index++;
+        continue;
+      }
+    }
+
+    if (action.type === 'extract' && snapshot?.text) {
+      const stateKey = `${snapshot.url}|${snapshot.text.slice(0, 1500)}`;
+      const seen = (extractsOnState.get(stateKey) ?? 0) + 1;
+      extractsOnState.set(stateKey, seen);
+      if (seen > 6) {
+        record(false, describeAction(action), 'blocked: this page state has been read 6 times - the answer is not here; navigate, scroll or click instead');
+        notes.push('You have extracted from this unchanged page 6 times with different questions. The information you want is not on this page - go to a different page, scroll, or click something to reveal new content.');
+        consecutiveBlocked++;
+        if (consecutiveBlocked >= STALL_LIMIT) {
+          return { status: 'failed', reason: `stalled: extract budget exhausted on an unchanged page`, steps };
+        }
         index++;
         continue;
       }

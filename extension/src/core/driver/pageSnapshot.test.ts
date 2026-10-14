@@ -61,7 +61,7 @@ describe('buildSnapshot', () => {
     expect(password).toMatchObject({ kind: 'textbox', value: '********' });
     expect(link).toMatchObject({ kind: 'link', name: 'Next page' });
     expect(button).toMatchObject({ kind: 'button', name: 'Place order' });
-    expect(select).toMatchObject({ kind: 'select', options: ['Small', 'Medium'] });
+    expect(select).toMatchObject({ kind: 'select', options: ['Small', 'Medium'], value: 'Medium' });
   });
 
   it('uses aria-label and placeholder as fallback names', () => {

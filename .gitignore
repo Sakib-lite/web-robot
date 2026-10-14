@@ -1,4 +1,7 @@
 docs/
+!docs/
+docs/*
+!docs/zcode-parity-audit-and-roadmap.md
 node_modules/
 .output/
 .wxt/

@@ -86,6 +86,10 @@ function kindFor(el: Element): ElementInfo['kind'] {
 }
 
 function valueFor(el: Element): string | undefined {
+  if (el instanceof HTMLSelectElement) {
+    const selected = el.selectedOptions[0];
+    return selected?.textContent?.trim() || el.value;
+  }
   if (el instanceof HTMLInputElement) {
     if (el.type === 'password') return el.value ? '********' : '';
     if (el.type === 'checkbox' || el.type === 'radio') return el.checked ? 'checked' : '';

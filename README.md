@@ -114,7 +114,7 @@ Repositories 27 … web-robot Autonomous browser agent…
 Tools the model can call:
 
 ```
-goto(url)  new_tab(url?)  switch_tab(id)  close_tab(id)  tabs()
+goto(url)  new_tab(url?)  switch_tab(id)  close_tab(id)
 click(ref)  fill(ref, text)  select(ref, option)  press(key)
 scroll(dir, amount?)  extract(goal)  wait(ms ≤ 5000)  snapshot()
 ask_user(question)  done(summary, data?)  fail(reason)
@@ -132,7 +132,7 @@ Loop rules enforced in code:
 
 1. **Refs are only valid in the latest observation.** `e3` after another action means nothing — the model must use the fresh ids.
 2. **Effect-based verification.** A click "worked" iff the expected state change appears in the next observation — never inferred from the absence of errors.
-3. **Step limit** (default 40) — then `fail` with the partial step log.
+3. **Step limit** (default 400) — then `fail` with the partial step log.
 4. **Loop detection**: the same action on an unchanged page nudges at 3 repeats ("choose a different approach"), fails at 5.
 5. **Extract accumulates.** Listing tasks collect each page's content; the model reports the whole set in `done`.
 6. **Escalation ladder**: retry → different path → `ask_user` (the panel shows a prompt dialog) — never silent spinning.
@@ -152,9 +152,8 @@ The extension is sandboxed, so local file/command access rides on the backend: a
 
 ### Resilience, milestones, skills, tabs (built on top of the workspace)
 
-- **Milestone plans**: multi-step runs keep a `PLAN.md` (`.web-robot/tasks/<id>/`) — milestones the model maintains via `update_plan`, findings auto-appended from every `note`. Written by loop code, not extra LLM turns.
-- **Failure re-investigation**: before any run is accepted as failed (model give-up, step limit, stall, LLM error), one verdict call can `resume` it with a concrete next instruction and a fresh 25-step budget (max 2 rounds). Partial beats failing.
-- **Zombie reaper + resume-on-reclaim**: workers heartbeat `busy` + `currentTask` during runs; a running task whose runner stops heartbeating is requeued after ~90s (3 interruptions → failed with the reason) and the next claim **resumes from PLAN.md** instead of restarting. `POST /tasks/:id/retry` requeues any failed/stopped task with its plan.
+- **Simple agent loop**: steps passed to a task are plain ordered instructions; there is no update_plan tool or PLAN.md machinery on this branch. Loop stoppers (repeated-action block, identical-failing-exec block, per-page extract budget, stall limit) keep runs bounded.
+- **Zombie reaper**: workers heartbeat `busy` + `currentTask` during runs; a running task whose runner stops heartbeating is requeued after ~90s (3 interruptions → failed with the reason). `POST /tasks/:id/retry` requeues any failed/stopped task — prior files in its task folder remain readable, so a retried run can pick up where it left off by reading them.
 - **Single-flight**: claims are marked busy the instant a task is handed out, so the service worker and panel never run two tasks in parallel.
 - **Skills**: `skills/<slug>/SKILL.md` in the workspace (frontmatter: `name`, `description`, optional `model`/`effort`/`maxSteps`) — picked from a dropdown next to the task input (or `/slug` inline); the body is injected as the run's preamble. The agent can author skills itself with `write_file`.
 - **Tab ownership**: agent-opened tabs are marked `(agent)` in observations, capped at 6 (oldest closed automatically), and closed when the task ends.
