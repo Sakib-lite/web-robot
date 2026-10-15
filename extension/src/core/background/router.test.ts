@@ -5,7 +5,7 @@ import type { Snapshot } from '../driver/types';
 
 const snapshot: Snapshot = { url: 'https://shop.dev', title: 'Shop', text: 'hi', elements: [] };
 
-function fakeTabs(over: Partial<Record<'query' | 'sendMessage' | 'update' | 'create' | 'remove' | 'reload', (...args: never[]) => unknown>> = {}) {
+function fakeTabs(over: Partial<Record<'query' | 'sendMessage' | 'update' | 'create' | 'remove' | 'reload' | 'get', (...args: never[]) => unknown>> = {}) {
   return {
     query: async () => [] as chrome.tabs.Tab[],
     sendMessage: async () => undefined,
@@ -13,6 +13,7 @@ function fakeTabs(over: Partial<Record<'query' | 'sendMessage' | 'update' | 'cre
     create: async () => ({ id: 9 }) as chrome.tabs.Tab,
     remove: async () => undefined,
     reload: async () => undefined,
+    get: async () => ({ id: 7, status: 'complete', url: 'https://t.dev' }) as chrome.tabs.Tab,
     ...over,
   } as unknown as typeof chrome.tabs;
 }
@@ -120,7 +121,7 @@ describe('handleMessage', () => {
       update,
     });
     const res = await handleMessage({ type: 'RUN_ACTION', action: { type: 'goto', url: 'https://new.dev' } }, { tabs, scripting: fakeScripting() });
-    expect(res).toEqual({ ok: true, detail: 'navigated to https://new.dev/' });
+    expect(res).toEqual({ ok: true, detail: 'navigated to https://new.dev/', data: { tabId: 7 } });
     expect(update).toHaveBeenCalledWith(7, { url: 'https://new.dev/' });
 
     const bad = await handleMessage({ type: 'RUN_ACTION', action: { type: 'goto', url: 'javascript:alert(1)' } }, { tabs, scripting: fakeScripting() });
@@ -136,7 +137,7 @@ describe('handleMessage', () => {
       reload,
     });
     const res = await handleMessage({ type: 'RUN_ACTION', action: { type: 'goto', url: 'https://same.dev/page' } }, { tabs, scripting: fakeScripting() });
-    expect(res).toEqual({ ok: true, detail: 'reloaded https://same.dev/page (fresh page state)' });
+    expect(res).toEqual({ ok: true, detail: 'reloaded https://same.dev/page (fresh page state)', data: { tabId: 7 } });
     expect(reload).toHaveBeenCalledWith(7);
     expect(update).not.toHaveBeenCalled();
   });
@@ -187,5 +188,26 @@ describe('handleMessage', () => {
   it('rejects unknown message types', async () => {
     const res = await handleMessage({ type: 'EXPLODE' } as never, { tabs: fakeTabs(), scripting: fakeScripting() });
     expect(res).toEqual({ ok: false, error: expect.stringContaining('unknown message type') });
+  });
+});
+
+
+describe('task-bound tab targeting', () => {
+  it('targets the given tabId instead of the active tab', async () => {
+    const sendMessage = tabResponse(async () => ({ ok: true, snapshot: { url: 'https://pinned.dev', title: 'P', text: 'x', elements: [] } }) as ContentResponse);
+    const get = vi.fn(async () => ({ id: 42, status: 'complete', url: 'https://pinned.dev' }));
+    const tabs = fakeTabs({ get, sendMessage });
+    const res = await handleMessage({ type: 'GET_SNAPSHOT', tabId: 42 }, { tabs, scripting: fakeScripting() });
+    expect(res.ok).toBe(true);
+    expect(get).toHaveBeenCalledWith(42);
+  });
+
+  it('reports a gone task tab instead of drifting to the active one', async () => {
+    const get = vi.fn(async () => {
+      throw new Error('no tab');
+    });
+    const tabs = fakeTabs({ get });
+    const res = await handleMessage({ type: 'GET_SNAPSHOT', tabId: 42 }, { tabs, scripting: fakeScripting() });
+    expect(res).toEqual({ ok: false, error: 'task tab 42 no longer exists' });
   });
 });

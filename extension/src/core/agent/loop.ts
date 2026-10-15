@@ -167,6 +167,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   const seenPageStates = new Set<string>();
   const repeatCounts = new Map<string, number>();
   const extractsOnState = new Map<string, number>();
+  let effectProbe: { call: string; key: string } | null = null;
   const blockedKeys = new Set<string>();
   const readLedger = new Set<string>();
   let latestLocal: { label: string; text: string } | null = null;
@@ -216,6 +217,13 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       tabs = await deps.driver.tabs();
       snapshot = await deps.driver.snapshot(elementSkip);
       if (snapshot?.text) seenPageStates.add(snapshot.text.slice(0, 500));
+      if (effectProbe && snapshot) {
+        const nowKey = `${snapshot.url}|${snapshot.title}|${snapshot.text.length}|${snapshot.text.slice(0, 1500)}`;
+        if (nowKey === effectProbe.key) {
+          notes.push(`${effectProbe.call} had no visible effect on the page - the page state is identical. That element is a dead end; pick a different element or approach.`);
+        }
+        effectProbe = null;
+      }
     } catch {
     }
     await deps.telemetry?.observe(index + 1, {
@@ -430,6 +438,12 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       continue;
     }
 
+    if (snapshot && (action.type === 'click' || action.type === 'fill' || action.type === 'select' || action.type === 'press')) {
+      effectProbe = {
+        call: describeAction(action),
+        key: `${snapshot.url}|${snapshot.title}|${snapshot.text.length}|${snapshot.text.slice(0, 1500)}`,
+      };
+    }
     const actionStarted = Date.now();
     const result = await deps.driver.act(action);
     if (action.type === 'new_tab' && result.ok) {

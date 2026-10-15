@@ -16,6 +16,32 @@ export function navigableUrl(raw: string): string | null {
   }
 }
 
+async function resolveTab(tabsApi: TabsApi, tabId?: number): Promise<chrome.tabs.Tab | null> {
+  if (tabId !== undefined) {
+    try {
+      const tab = await tabsApi.get(tabId);
+      return tab ?? null;
+    } catch {
+      return null;
+    }
+  }
+  return activeTab(tabsApi);
+}
+
+async function waitForComplete(tabsApi: TabsApi, tabId: number, timeoutMs = 5000): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const tab = await tabsApi.get(tabId);
+      if (tab?.status === 'complete') break;
+    } catch {
+      break;
+    }
+    await sleep(150);
+  }
+  await sleep(300);
+}
+
 async function activeTab(tabsApi: TabsApi): Promise<chrome.tabs.Tab | null> {
   const [current] = await tabsApi.query({ active: true, currentWindow: true });
   if (current) return current;
@@ -59,12 +85,12 @@ async function runBrowserAction(tab: chrome.tabs.Tab | undefined, action: Action
       if (!url) return { ok: false, error: `not a navigable url: ${action.url}` };
       if (tab.url === url) {
         await tabsApi.reload(tab.id);
-        await sleep(1500);
-        return { ok: true, detail: `reloaded ${url} (fresh page state)` };
+        await waitForComplete(tabsApi, tab.id);
+        return { ok: true, detail: `reloaded ${url} (fresh page state)`, data: { tabId: tab.id } };
       }
       await tabsApi.update(tab.id, { url });
-      await sleep(600);
-      return { ok: true, detail: `navigated to ${url}` };
+      await waitForComplete(tabsApi, tab.id);
+      return { ok: true, detail: `navigated to ${url}`, data: { tabId: tab.id } };
     }
     case 'new_tab': {
       const url = action.url ? navigableUrl(action.url) : 'about:blank';
@@ -75,7 +101,7 @@ async function runBrowserAction(tab: chrome.tabs.Tab | undefined, action: Action
         return { ok: true, detail: `reused existing tab ${existing.id} at ${url}`, data: { tabId: existing.id } };
       }
       const tab = await tabsApi.create({ url, active: true });
-      await sleep(600);
+      await waitForComplete(tabsApi, tab.id as number);
       return { ok: true, detail: `opened tab ${tab.id} at ${url}`, data: { tabId: tab.id } };
     }
     case 'switch_tab': {
@@ -117,8 +143,8 @@ export async function handleMessage(message: PanelRequest, apis: BrowserApis): P
   }
 
   if (message.type === 'GET_SNAPSHOT') {
-    const tab = await activeTab(tabsApi);
-    if (!tab?.id) return { ok: false, error: 'no active tab' };
+    const tab = await resolveTab(tabsApi, message.tabId);
+    if (!tab?.id) return { ok: false, error: message.tabId !== undefined ? `task tab ${message.tabId} no longer exists` : 'no active tab' };
     if (!tab.url?.startsWith('http')) return { ok: false, error: `cannot read this page (${tab.url ?? 'unknown url'})` };
     await ensureInjected(tabsApi, scriptingApi, tab.id);
     const res = await sendToTab(tabsApi, tab.id, { type: 'SNAPSHOT', ...(message.skip !== undefined ? { skip: message.skip } : {}) });
@@ -139,8 +165,8 @@ export async function handleMessage(message: PanelRequest, apis: BrowserApis): P
       return { ok: true, detail: `waited ${action.ms}ms` };
     }
 
-    const tab = await activeTab(tabsApi);
-    if (!tab?.id) return { ok: false, error: 'no active tab' };
+    const tab = await resolveTab(tabsApi, message.tabId);
+    if (!tab?.id) return { ok: false, error: message.tabId !== undefined ? `task tab ${message.tabId} no longer exists` : 'no active tab' };
 
     if (action.type === 'goto') {
       return runBrowserAction(tab, action, tabsApi);

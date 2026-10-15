@@ -201,6 +201,33 @@ describe('runTask', () => {
     expect(result.summary).toContain('MIT');
   });
 
+  it('reports a no-effect interaction in context (task-97 semantics)', async () => {
+    const snap = snapshot({ elements: [{ ref: 'e1', tag: 'div', kind: 'button' as const, name: 'dead row' }] });
+    const driver = fakeDriver({ snapshot: async () => snap, act: async () => ({ ok: true, detail: 'clicked e1' }) });
+    const chat = vi.fn(async (_messages: ChatMessage[]) => reply('', [toolCall('click', { ref: 'e1' })]));
+    const result = await runTask('click it', deps({ driver, chat }));
+    expect(result.status).toBe('failed');
+    const noteSeen = chat.mock.calls.some((c) => (c[0] as ChatMessage[]).some((m) => m.content?.includes('no visible effect on the page')));
+    expect(noteSeen).toBe(true);
+  });
+
+  it('regression #97: a select with a value lets the model verify the filter from the observation and click rows', async () => {
+    const page = snapshot({
+      elements: [
+        { ref: 'e23', tag: 'select', kind: 'select' as const, name: 'Filter the list by status', value: 'New', options: ['All', 'New', 'Applied', 'Automated'] },
+        { ref: 'e38', tag: 'div', kind: 'button' as const, name: 'PhD Position at ISTA' },
+      ],
+    });
+    const driver = fakeDriver({ snapshot: async () => page });
+    const chat = vi.fn(async (_messages: ChatMessage[]) => reply('', [toolCall('click', { ref: 'e38' })]));
+    const result = await runTask('check the filter then click rows', deps({ driver, chat }));
+    const first = chat.mock.calls[0]![0] as ChatMessage[];
+    const observation = first.find((m) => m.role === 'user' && m.content?.includes('CURRENT PAGE'))?.content ?? '';
+    expect(observation).toContain('value="New"');
+    expect(observation).toContain('options=All|New|Applied|Automated');
+    expect(result.steps.some((s) => s.ok && s.call.includes('e38'))).toBe(true);
+  });
+
   it('fails as stalled only when every chosen action is blocked', async () => {
     const urls = ['https://x.dev/repo?tab=repositories&page=2', 'https://x.dev/repo?page=2&tab=repositories'];
     let i = 0;

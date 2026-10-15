@@ -41,3 +41,31 @@ describe('createDriver', () => {
     expect(seen).toEqual([{ type: 'RUN_ACTION', action: { type: 'goto', url: 'https://x.dev' } }]);
   });
 });
+
+
+describe('task-bound session tab pinning', () => {
+  it('pins the tab opened by new_tab and targets it afterwards; switch/close re-pin', async () => {
+    const sent: unknown[] = [];
+    const send = async (message: never) => {
+      sent.push(message);
+      const m = message as { type: string; action?: { type: string } };
+      if (m.type === 'GET_SNAPSHOT') return { ok: true, snapshot: { url: 'https://a.dev', title: 'A', text: 'x', elements: [] } };
+      if (m.type === 'RUN_ACTION' && m.action?.type === 'new_tab') return { ok: true, detail: 'opened', data: { tabId: 9 } };
+      if (m.type === 'RUN_ACTION' && m.action?.type === 'switch_tab') return { ok: true, detail: 'switched' };
+      if (m.type === 'RUN_ACTION' && m.action?.type === 'close_tab') return { ok: true, detail: 'closed' };
+      return { ok: true, detail: 'ok' };
+    };
+    const driver = createDriver(send as never);
+    await driver.act({ type: 'new_tab', url: 'https://a.dev' });
+    await driver.snapshot();
+    expect(sent[1]).toMatchObject({ type: 'GET_SNAPSHOT', tabId: 9 });
+
+    await driver.act({ type: 'switch_tab', tabId: 4 });
+    await driver.snapshot();
+    expect(sent[3]).toMatchObject({ type: 'GET_SNAPSHOT', tabId: 4 });
+
+    await driver.act({ type: 'close_tab', tabId: 4 });
+    await driver.snapshot();
+    expect(sent[5]).not.toHaveProperty('tabId');
+  });
+});

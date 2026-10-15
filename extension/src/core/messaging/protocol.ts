@@ -11,8 +11,8 @@ export type ContentResponse =
 
 export type PanelRequest =
   | { type: 'GET_TABS' }
-  | { type: 'GET_SNAPSHOT'; skip?: number }
-  | { type: 'RUN_ACTION'; action: Action };
+  | { type: 'GET_SNAPSHOT'; skip?: number; tabId?: number }
+  | { type: 'RUN_ACTION'; action: Action; tabId?: number };
 
 export type PanelResponse =
   | { ok: true; tabs?: TabInfo[]; snapshot?: Snapshot; detail?: string; data?: unknown }
