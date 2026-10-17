@@ -194,7 +194,7 @@ describe('handleMessage', () => {
 
 describe('task-bound tab targeting', () => {
   it('targets the given tabId instead of the active tab', async () => {
-    const sendMessage = tabResponse(async (): Promise<ContentResponse> => ({ ok: true, snapshot: { url: 'https://pinned.dev', title: 'P', text: 'x', elements: [] } }));
+    const sendMessage = tabResponse((): ContentResponse => ({ ok: true, snapshot: { url: 'https://pinned.dev', title: 'P', text: 'x', elements: [] } }));
     const get = vi.fn(async () => ({ id: 42, status: 'complete', url: 'https://pinned.dev' }));
     const tabs = fakeTabs({ get, sendMessage });
     const res = await handleMessage({ type: 'GET_SNAPSHOT', tabId: 42 }, { tabs, scripting: fakeScripting() });
