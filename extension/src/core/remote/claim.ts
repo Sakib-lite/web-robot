@@ -79,6 +79,8 @@ export async function runClaimedTask(
   }
   const plane = createHttpPlane(async () => backendUrl);
   const info = await plane.describe().catch(() => null);
+  const resume = await buildResumePreamble(taskId, plane);
+  if (resume) preamble = preamble ? `${preamble}\n\n${resume}` : resume;
   await runRemoteTask(taskId, taskText, backendUrl, {
     provider,
     driver,
@@ -87,4 +89,19 @@ export async function runClaimedTask(
     ...(steps?.length ? { steps } : {}),
     ...(info?.enabled ? { workspace: { plane, root: info.root } } : {}),
   });
+}
+
+export function resumeNoteFor(taskId: number, entries: Array<{ name: string; dir: boolean }>): string | null {
+  const progress = entries.filter((e) => !e.dir && !['PLAN.md'].includes(e.name));
+  if (progress.length === 0) return null;
+  return `RESUME: a previous attempt of this task left ${progress.length} file(s) in .web-robot/tasks/${taskId}/ (${progress.map((e) => e.name).join(', ')}). read_file them FIRST, continue exactly where they end (append_file, never rewrite or redo collected rows), then proceed with the remaining work.`;
+}
+
+async function buildResumePreamble(taskId: number, plane: import('../local/plane').LocalPlane): Promise<string | null> {
+  try {
+    const listing = await plane.list(`.web-robot/tasks/${taskId}`);
+    return resumeNoteFor(taskId, listing.entries ?? []);
+  } catch {
+    return null;
+  }
 }
