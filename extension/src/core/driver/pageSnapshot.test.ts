@@ -120,6 +120,30 @@ describe('truncation + thin-main fallback (the phd.com lesson)', () => {
     expect(snap.elementsTruncated).toBe(true);
   });
 
+
+  it('builds a ZCode-style aria tree: regions, headings, and controls nested under their row', () => {
+    withBody(`
+      <header><button "x">nav-toggle</button></header>
+      <header><button>menu</button></header>
+      <main>
+        <h1>PhD Positions</h1>
+      </main>
+      <aside>
+        <div role="button" aria-label="PhD row ISTA"><input type="checkbox" title="select row"/><button>email</button></div>
+      </aside>
+    `);
+    const snap = buildSnapshot(document);
+    const tree = snap.ariaTree ?? '';
+    expect(tree).toContain('- header');
+    expect(tree).toContain('heading "PhD Positions" [level=1]');
+    expect(tree).toContain('aside');
+    const rowLine = tree.split('\n').find((l) => l.includes('PhD row ISTA')) ?? '';
+    expect(rowLine).toMatch(/\[e\d+\]$/);
+    const checkboxLine = tree.split('\n').find((l) => l.includes('select row')) ?? '';
+    expect(checkboxLine.startsWith('  '.repeat(2)) || tree.indexOf(checkboxLine) > tree.indexOf(rowLine)).toBe(true);
+    expect(tree.indexOf(checkboxLine)).toBeGreaterThan(tree.indexOf(rowLine));
+  });
+
   it('pages through long element lists with skip and stable absolute refs', () => {
     withBody(Array.from({ length: 120 }, (_, i) => `<a href="/x${i}">link ${i}</a>`).join(''));
     const first = buildSnapshot(document);

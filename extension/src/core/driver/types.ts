@@ -18,6 +18,7 @@ export interface Snapshot {
   elementsTruncated?: boolean;
   elementStart?: number;
   elementTotal?: number;
+  ariaTree?: string;
 }
 
 export interface TabInfo {

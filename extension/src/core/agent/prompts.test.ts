@@ -106,6 +106,15 @@ describe('observationBlock', () => {
     expect(block).toContain('smaller skip');
   });
 
+
+  it('renders the aria tree in place of the flat list when present', () => {
+    const treed = { ...snapshot, ariaTree: '- complementary\n  - button "PhD row title" [e38]\n    - checkbox "select" [e39]', elementStart: 37, elementTotal: 200, elementsTruncated: true };
+    const block = observationBlock([], treed);
+    expect(block).toContain('page tree');
+    expect(block).toContain('- button "PhD row title" [e38]');
+    expect(block).toContain('nested lines belong to their parent');
+  });
+
   it('says all elements are shown when nothing is cut off', () => {
     const full = { ...snapshot, elementStart: 0, elementTotal: 2, elementsTruncated: false };
     expect(observationBlock([], full)).toContain('elements (all 2 shown)');

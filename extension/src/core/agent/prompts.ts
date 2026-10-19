@@ -75,19 +75,20 @@ export function observationBlock(tabs: TabInfo[], snapshot: Snapshot | null, own
     const ownedMark = owned[t.id] !== undefined ? ' (agent)' : '';
     return `${driven} [${t.id}]${ownedMark} ${t.title ?? ''} ${t.url ?? ''}`.trimEnd();
   });
-  const elementLines = snapshot.elements.map(describeElement);
+  const elementLines = snapshot.ariaTree ? [snapshot.ariaTree] : snapshot.elements.map(describeElement);
   const start = snapshot.elementStart ?? 0;
   const total = snapshot.elementTotal ?? snapshot.elements.length;
   const end = start + snapshot.elements.length;
+  const noun = snapshot.ariaTree ? 'page tree (regions, headings and interactive elements with [ref] ids; nested lines belong to their parent - a checkbox under a row is that row\'s control)' : 'elements';
   let elementsHeader: string;
   if (snapshot.elements.length === 0 && total > 0) {
-    elementsHeader = `elements (0 shown - skip=${start} is past the end of ${total} total elements; take a snapshot with a smaller skip):`;
+    elementsHeader = `${noun} (0 shown - skip=${start} is past the end of ${total} total elements; take a snapshot with a smaller skip):`;
   } else if (end < total) {
-    elementsHeader = `elements (showing ${start + 1}-${end} of ${total} - MORE PAGES EXIST: take a snapshot with skip=${end} to see the next page; refs stay clickable across pages even when not shown; never claim full coverage until you have paged through every page):`;
+    elementsHeader = `${noun} (showing ${start + 1}-${end} of ${total} - MORE PAGES EXIST: take a snapshot with skip=${end} to see the next page; refs stay clickable across pages even when not shown; never claim full coverage until you have paged through every page):`;
   } else if (snapshot.elementsTruncated) {
-    elementsHeader = `elements (showing ${start + 1}-${end} of ${total}):`;
+    elementsHeader = `${noun} (showing ${start + 1}-${end} of ${total}):`;
   } else {
-    elementsHeader = `elements (all ${total} shown):`;
+    elementsHeader = `${noun} (all ${total} shown):`;
   }
   const textHeader = snapshot.textTruncated ? 'page text (truncated):' : 'page text:';
   return [

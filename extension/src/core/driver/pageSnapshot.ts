@@ -128,6 +128,7 @@ export function buildSnapshot(doc: Document, skip = 0): Snapshot {
   const start = Math.min(Math.max(0, Math.floor(skip)), Math.max(0, all.length - 1));
   const window = all.slice(start, start + MAX_ELEMENTS);
   const elements = window.map((el, index) => describeElement(el, start + index));
+  const ariaTree = buildAriaTree(doc, window, start);
   const mainRoot = doc.querySelector('main, [role="main"], article') as HTMLElement | null;
   let rawText = mainRoot?.innerText ?? '';
   const mainLen = rawText.trim().length;
@@ -145,9 +146,75 @@ export function buildSnapshot(doc: Document, skip = 0): Snapshot {
     elementsTruncated: start + window.length < all.length,
     elementStart: start,
     elementTotal: all.length,
+    ariaTree,
   };
 }
 
 function cssEscape(value: string): string {
   return value.replace(/["\\]/g, '\\$&');
+}
+
+const REGION_SELECTOR = 'main, [role="main"], nav, aside, header, footer, [role="complementary"], [role="banner"], dialog, [role="dialog"], article';
+
+const MAX_TREE_LINES = 120;
+
+export function buildAriaTree(doc: Document, interactiveWindow: Element[], startRef: number): string {
+  const regionEls = Array.from(doc.querySelectorAll(REGION_SELECTOR));
+  const interactiveSet = new Set(interactiveWindow);
+  const headings = Array.from(doc.querySelectorAll('h1,h2,h3,h4,h5,h6')).filter((h) => (h.textContent ?? '').trim());
+
+  type Entry = { el: Element; ref?: string; kind: 'node' | 'heading' };
+  const entries: Entry[] = [
+    ...interactiveWindow.map((el, i) => ({ el, ref: `e${startRef + i + 1}`, kind: 'node' as const })),
+    ...headings.map((el) => ({ el, kind: 'heading' as const })),
+  ];
+  entries.sort((a, b) => (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+
+  const emittedRegions = new Set<Element>();
+  const lines: string[] = [];
+  const regionDepth = (el: Element): number => {
+    let d = 0;
+    let p = el.parentElement;
+    while (p) {
+      if (regionEls.includes(p)) d++;
+      p = p.parentElement;
+    }
+    return d;
+  };
+  const labelRegion = (el: Element): string => {
+    const role = el.getAttribute('role');
+    const label = el.getAttribute('aria-label')?.trim();
+    const tag = el.tagName.toLowerCase();
+    const name = role && role !== tag ? role : tag;
+    return label ? `${name} "${label.slice(0, 40)}"` : name;
+  };
+
+  for (const entry of entries) {
+    const ancestors = regionEls.filter((r) => r !== entry.el && r.contains(entry.el));
+    for (const region of ancestors) {
+      if (!emittedRegions.has(region)) {
+        emittedRegions.add(region);
+        lines.push(`${'  '.repeat(regionDepth(region))}- ${labelRegion(region)}`);
+      }
+    }
+    let depth = ancestors.length;
+    let p = entry.el.parentElement;
+    while (p) {
+      if (interactiveSet.has(p)) depth++;
+      p = p.parentElement;
+    }
+    if (entry.kind === 'heading') {
+      const level = Number(entry.el.tagName[1]);
+      lines.push(`${'  '.repeat(depth)}- heading "${(entry.el.textContent ?? '').trim().slice(0, 70)}" [level=${level}]`);
+    } else {
+      const info = describeElement(entry.el, 0);
+      const name = info.name ? ` "${info.name.slice(0, 80)}"` : '';
+      lines.push(`${'  '.repeat(depth)}- ${info.kind}${name} [${entry.ref}]`);
+    }
+    if (lines.length >= MAX_TREE_LINES) {
+      lines.push('… (tree truncated - snapshot with skip for the next window)');
+      return lines.join('\n');
+    }
+  }
+  return lines.join('\n');
 }
