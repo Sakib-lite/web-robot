@@ -1,4 +1,4 @@
-import { buildSnapshot, collectInteractive } from '@/core/driver/pageSnapshot';
+import { buildSnapshot, collectInteractive, elementForRef } from '@/core/driver/pageSnapshot';
 import { runPageAction } from '@/core/driver/pageActions';
 import type { ContentRequest, ContentResponse } from '@/core/messaging/protocol';
 
@@ -6,16 +6,11 @@ export default defineContentScript({
   matches: ['<all_urls>'],
   runAt: 'document_idle',
   main() {
-    let elements: Element[] = [];
-
-    const resolveRef = (ref: string): Element | null => {
-      const index = Number(ref.replace(/^e/, '')) - 1;
-      return elements[index] ?? null;
-    };
+    const resolveRef = (ref: string): Element | null => elementForRef(document, ref);
 
     chrome.runtime.onMessage.addListener((message: ContentRequest, _sender, sendResponse) => {
       if (message?.type === 'SNAPSHOT') {
-        elements = collectInteractive(document);
+        collectInteractive(document);
         sendResponse({ ok: true, snapshot: buildSnapshot(document, message.skip ?? 0) });
         return;
       }

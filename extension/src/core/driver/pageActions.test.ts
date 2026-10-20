@@ -1,13 +1,14 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
 import { runPageAction } from './pageActions';
-import { buildSnapshot, collectInteractive } from './pageSnapshot';
+import { buildSnapshot, elementForRef, resetRefMaps } from './pageSnapshot';
 
 function prepare(html: string) {
   document.body.innerHTML = html;
-  const elements = collectInteractive(document);
+  resetRefMaps(document);
+  buildSnapshot(document);
   const map = new Map<string, Element>();
-  buildSnapshot(document).elements.forEach((info, index) => map.set(info.ref, elements[index]!));
+  buildSnapshot(document).elements.forEach((info) => map.set(info.ref, elementForRef(document, info.ref)!));
   const resolve = (ref: string) => map.get(ref) ?? null;
   return { resolve, map };
 }

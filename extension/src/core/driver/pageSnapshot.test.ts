@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
-import { buildSnapshot, collectInteractive } from './pageSnapshot';
+import { buildSnapshot, collectInteractive, elementForRef, resetRefMaps } from './pageSnapshot';
 
 function withBody(html: string) {
   document.body.innerHTML = html;
+  resetRefMaps(document);
   return document;
 }
 
@@ -120,6 +121,35 @@ describe('truncation + thin-main fallback (the phd.com lesson)', () => {
     expect(snap.elementsTruncated).toBe(true);
   });
 
+
+
+  it('pins refs to elements: inserting a row above does not shift existing refs', () => {
+    withBody('<button id="a">A</button><button id="b">B</button>');
+    const first = buildSnapshot(document);
+    const aRef = first.elements[0]!.ref;
+
+    const prepended = document.createElement('button');
+    prepended.id = 'new';
+    prepended.textContent = 'NEW';
+    document.body.prepend(prepended);
+
+    const second = buildSnapshot(document);
+    const stillA = second.elements.find((e) => e.name === 'A')!;
+    expect(stillA.ref).toBe(aRef);
+    expect(elementForRef(document, aRef)!.id).toBe('a');
+  });
+
+  it('collects role=button containers and pointer-cursor divs as click targets', () => {
+    withBody(`
+      <div role="button" aria-label="row one">r1</div>
+      <div style="cursor: pointer" onclick="void 0">clickable plain div</div>
+      <div>plain non clickable</div>
+    `);
+    const names = buildSnapshot(document).elements.map((e) => e.name);
+    expect(names).toContain('row one');
+    expect(names).toContain('clickable plain div');
+    expect(names).not.toContain('plain non clickable');
+  });
 
   it('builds a ZCode-style aria tree: regions, headings, and controls nested under their row', () => {
     withBody(`
