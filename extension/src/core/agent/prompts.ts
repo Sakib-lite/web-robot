@@ -26,13 +26,13 @@ export interface ExtractRecord {
   text: string;
 }
 
-const MAX_LATEST_EXTRACT = 4000;
+const MAX_LATEST_EXTRACT = 1500;
 const MAX_OLDER_EXTRACT = 150;
 const MAX_EXTRACTS_KEPT = 5;
 
-const MAX_NOTES_SHOWN = 30;
+const MAX_NOTES_SHOWN = 15;
 
-const MAX_STEPS_SHOWN = 30;
+const MAX_STEPS_SHOWN = 10;
 
 export function taskContext(
   task: string,

@@ -46,12 +46,12 @@ describe('taskContext', () => {
     expect(taskContext('buy milk', [], [], [])).toBe('TASK:\nbuy milk');
   });
 
-  it('omits old steps beyond thirty to keep context lean', () => {
+  it('omits old steps beyond ten to keep context lean', () => {
     const steps = Array.from({ length: 45 }, (_, i) => `step ${i + 1}`);
     const context = taskContext('t', steps, [], [], []);
-    expect(context).toContain('first 15 omitted');
+    expect(context).toContain('first 35 omitted');
     expect(context).not.toContain('step 1\n');
-    expect(context).toContain('16. step 16');
+    expect(context).toContain('36. step 36');
     expect(context).toContain('45. step 45');
   });
 
@@ -67,11 +67,11 @@ describe('taskContext', () => {
     expect(context).toContain('B'.repeat(300));
   });
 
-  it('caps notes at thirty with an omission marker', () => {
+  it('caps notes at fifteen with an omission marker', () => {
     const notes = Array.from({ length: 45 }, (_, i) => `finding ${i + 1}`);
     const context = taskContext('t', [], [], [], notes);
-    expect(context).toContain('first 15 older notes omitted');
-    expect(context).toContain('16. finding 16');
+    expect(context).toContain('first 30 older notes omitted');
+    expect(context).toContain('31. finding 31');
     expect(context).toContain('45. finding 45');
     expect(context).not.toContain('finding 1\n');
   });

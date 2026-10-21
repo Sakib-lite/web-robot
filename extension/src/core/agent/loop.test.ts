@@ -228,6 +228,31 @@ describe('runTask', () => {
     expect(result.steps.some((s) => s.ok && s.call.includes('e38'))).toBe(true);
   });
 
+  it('blocks a fourth consecutive read and demands action', async () => {
+    let calls = 0;
+    const chat = vi.fn(async (_messages: ChatMessage[]) => {
+      calls++;
+      return reply('', [toolCall('extract', { goal: `look ${calls}` })]);
+    });
+    const result = await runTask('collect things', deps({ chat }));
+    expect(result.status).toBe('failed');
+    expect(result.reason).toContain('reads blocked');
+    const blockedNote = chat.mock.calls.some((c) => (c[0] as ChatMessage[]).some((m) => m.content?.includes('READS ARE BLOCKED')));
+    expect(blockedNote).toBe(true);
+    expect(calls).toBeLessThan(12);
+  });
+
+  it('treats an aborted in-flight llm call as stopped, not failed', async () => {
+    const controller = new AbortController();
+    const chat = async () => {
+      controller.abort();
+      throw new Error('signal is aborted without reason');
+    };
+    const result = await runTask('do it', deps({ chat, signal: controller.signal }));
+    expect(result.status).toBe('stopped');
+    expect(result.reason).toBe('cancelled by user');
+  });
+
   it('fails as stalled only when every chosen action is blocked', async () => {
     const urls = ['https://x.dev/repo?tab=repositories&page=2', 'https://x.dev/repo?page=2&tab=repositories'];
     let i = 0;
@@ -279,8 +304,8 @@ describe('runTask', () => {
     const result = await runTask('find the pte score', deps({ driver, chat }));
 
     expect(result.status).toBe('failed');
-    expect(result.reason).toContain('stalled');
-    expect(act.mock.calls.filter((c) => (c[0] as Action).type === 'extract').length).toBe(6);
+    expect(result.reason).toContain('reads blocked');
+    expect(act.mock.calls.filter((c) => (c[0] as Action).type === 'extract').length).toBe(3);
   });
 
   it('caps total extracts on one unchanged page state', async () => {
@@ -296,8 +321,8 @@ describe('runTask', () => {
 
     expect(result.status).toBe('failed');
     const acted = act.mock.calls.filter((c) => (c[0] as Action).type === 'extract').length;
-    const blocked = result.steps.filter((s) => !s.ok && s.detail.includes('read 6 times')).length;
-    expect(acted).toBe(6);
+    expect(acted).toBe(3);
+    const blocked = result.steps.filter((s) => !s.ok && (s.detail.includes('read 6 times') || s.detail.includes('three read-only calls'))).length;
     expect(blocked).toBeGreaterThanOrEqual(1);
   });
 
@@ -530,20 +555,16 @@ describe('workspace tools', () => {
     return deps({ ...rest, workspace: { plane: plane ?? fakePlane(), root: '/tmp/robots' } });
   }
 
-  it('creates a new file blind, but blocks overwriting an unread existing file', async () => {
-    const plane = fakePlane();
-    plane.files.set('report.md', 'existing content\nline two\nline three\n');
+  it('creates a new file blind, and redirects an overwrite of an unread file to an append', async () => {
     const chat = vi
       .fn()
-      .mockResolvedValueOnce(reply('', [toolCall('write_file', { path: 'new.md', content: 'fresh' })]))
-      .mockResolvedValueOnce(reply('', [toolCall('write_file', { path: 'report.md', content: 'clobber' })]))
-      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'tried both' })]));
-    const result = await runTask('write files', wsDeps({ chat, plane }));
-
-    expect(result.steps[0]).toMatchObject({ ok: true, call: 'write_file new.md' });
-    expect(result.steps[1]).toMatchObject({ ok: false });
-    expect(result.steps[1]!.detail).toContain('read_file');
-    expect(plane.files.get('report.md')).toBe('existing content\nline two\nline three\n');
+      .mockResolvedValueOnce(reply('', [toolCall('write_file', { path: 'out.md', content: '# head' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('write_file', { path: 'out.md', content: 'more content' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'written' })]));
+    const result = await runTask('write it', wsDeps({ chat, plane: fakePlane() }));
+    expect(result.status).toBe('done');
+    expect(result.steps[1]!.ok).toBe(true);
+    expect(result.steps[1]!.detail).toContain('appended instead');
   });
 
   it('allows editing only after a read, and the read stays in context', async () => {

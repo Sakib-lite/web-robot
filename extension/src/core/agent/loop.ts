@@ -184,6 +184,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   const blockedExecCmds = new Set<string>();
   let notes: string[] = [];
   let noToolStrikes = 0;
+  let consecutiveReads = 0;
   let index = 0;
 
   function record(ok: boolean, call: string, detail: string) {
@@ -264,6 +265,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       await deps.telemetry?.llm(index + 1, { messages, error: reason, durationMs: Date.now() - chatStarted });
+      if (deps.signal?.aborted) return { status: 'stopped', reason: 'cancelled by user', steps };
       return { status: 'failed', reason: `llm error: ${reason}`, steps };
     }
     await deps.telemetry?.llm(index + 1, {
@@ -299,6 +301,21 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     }
 
     const agentCall = parsed.call;
+    const isRead = agentCall.kind === 'action' && agentCall.action.type === 'extract'
+      || agentCall.kind === 'observe'
+      || (agentCall.kind === 'local' && (agentCall.call.op === 'read_file' || agentCall.call.op === 'list_dir'));
+    if (isRead && consecutiveReads >= 3) {
+      record(false, call.name, 'blocked: three read-only calls in a row without acting - ACT NOW (click a row, select, goto, write/append a file, or done)');
+      notes.push('READS ARE BLOCKED until you act. You have only observed. Your next call must change something: click the next item, select an option, goto a page, or append_file your findings. Do not call extract, snapshot, read_file or list_dir again.');
+      consecutiveBlocked++;
+      if (consecutiveBlocked >= STALL_LIMIT) {
+        return { status: 'failed', reason: 'stalled: reads blocked for inaction were repeatedly ignored', steps };
+      }
+      index++;
+      continue;
+    }
+    if (isRead) consecutiveReads++;
+    else consecutiveReads = 0;
     if (agentCall.kind === 'done') {
       let summary = agentCall.summary;
       if (filesTouched.size > 0) {
@@ -332,6 +349,13 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     }
     if (agentCall.kind === 'note') {
       agentNotes.push(agentCall.text);
+      if (deps.workspace && taskDir) {
+        try {
+          await deps.workspace.plane.append(`${taskDir}/findings.md`, `- ${agentCall.text}\n`);
+          filesTouched.set(`${taskDir}/findings.md`, 'note');
+        } catch {
+        }
+      }
       record(true, 'note', agentNoteDetail(agentCall.text));
       index++;
       continue;
@@ -349,7 +373,11 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
         index++;
         continue;
       }
-      const outcome = await runLocal(agentCall.call, deps.workspace.plane, readLedger, taskDir);
+      let outcome = await runLocal(agentCall.call, deps.workspace.plane, readLedger, taskDir);
+      if (!outcome.ok && agentCall.call.op === 'write_file' && outcome.detail.includes('already exists')) {
+        outcome = await runLocal({ op: 'append_file', path: agentCall.call.path, text: `\n${agentCall.call.content}` }, deps.workspace.plane, readLedger, taskDir);
+        if (outcome.ok) outcome = { ...outcome, detail: `file existed - content appended instead (${outcome.detail})` };
+      }
       if (agentCall.call.op === 'exec') {
         if (outcome.ok) {
           execFailCmd = '';
