@@ -242,6 +242,23 @@ describe('runTask', () => {
     expect(calls).toBeLessThan(12);
   });
 
+  it('bounces a done that skips the required web research, accepts after navigation', async () => {
+    const chat = vi.fn(async (_messages: ChatMessage[]) => reply('', [toolCall('done', { summary: 'Task complete' })]));
+    const driver = fakeDriver({ act: async (action: Action) => ({ ok: true, detail: `did ${action.type}` }) });
+    const result = await runTask('collect unis, then web search each university admission details', deps({ driver, chat }));
+
+    expect(result.status).toBe('done');
+    const bounced = chat.mock.calls.some((c) => (c[0] as ChatMessage[]).some((m) => m.content?.includes('never left the original site')));
+    expect(bounced).toBe(true);
+  });
+
+  it('accepts done without web research when the task never asked for it', async () => {
+    const chat = vi.fn(async (_messages: ChatMessage[]) => reply('', [toolCall('done', { summary: 'Task complete' })]));
+    const result = await runTask('collect unis from the page', deps({ chat }));
+    expect(result.status).toBe('done');
+    expect(chat).toHaveBeenCalledTimes(1);
+  });
+
   it('treats an aborted in-flight llm call as stopped, not failed', async () => {
     const controller = new AbortController();
     const chat = async () => {

@@ -185,6 +185,9 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   let notes: string[] = [];
   let noToolStrikes = 0;
   let consecutiveReads = 0;
+  const wantsWebResearch = /web[- ]search|search (?:each|every|the web)|from the web|from web|google it|search online/i.test(task);
+  const domainsVisited = new Set<string>();
+  let researchBounce = false;
   let index = 0;
 
   function record(ok: boolean, call: string, detail: string) {
@@ -317,6 +320,13 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     if (isRead) consecutiveReads++;
     else consecutiveReads = 0;
     if (agentCall.kind === 'done') {
+      if (wantsWebResearch && !researchBounce && domainsVisited.size === 0) {
+        researchBounce = true;
+        record(false, 'done', 'bounced: the task requires web research but no search/site navigation happened');
+        notes.push('Your done call skips a required part of the task: it asks for web research (per-university admission details from the web) and you never left the original site. Do that now: open a search page (new_tab to bing.com or google.com), look up each distinct university admission details, and append them with source urls. Then call done.');
+        index++;
+        continue;
+      }
       let summary = agentCall.summary;
       if (filesTouched.size > 0) {
         const root = deps.workspace?.root;
@@ -373,9 +383,9 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
         index++;
         continue;
       }
-      let outcome = await runLocal(agentCall.call, deps.workspace.plane, readLedger, taskDir);
+      let outcome = await runLocal(agentCall.call, deps.workspace.plane, readLedger, taskDir, deps.workspace.root);
       if (!outcome.ok && agentCall.call.op === 'write_file' && outcome.detail.includes('already exists')) {
-        outcome = await runLocal({ op: 'append_file', path: agentCall.call.path, text: `\n${agentCall.call.content}` }, deps.workspace.plane, readLedger, taskDir);
+        outcome = await runLocal({ op: 'append_file', path: agentCall.call.path, text: `\n${agentCall.call.content}` }, deps.workspace.plane, readLedger, taskDir, deps.workspace.root);
         if (outcome.ok) outcome = { ...outcome, detail: `file existed - content appended instead (${outcome.detail})` };
       }
       if (agentCall.call.op === 'exec') {
@@ -414,6 +424,12 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     }
 
     const action = agentCall.action;
+    if (action.type === 'goto' || action.type === 'new_tab') {
+      try {
+        domainsVisited.add(new URL(action.url ?? 'about:blank', 'https://x.invalid').hostname);
+      } catch {
+      }
+    }
     const danger = isDangerous(action, snapshot);
     if (danger) {
       const answer = await deps.askUser(`Allow web-robot to ${danger}? (yes/no)`);

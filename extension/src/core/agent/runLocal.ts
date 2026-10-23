@@ -10,7 +10,7 @@ export interface LocalOutcome {
   durationMs: number;
 }
 
-export async function runLocal(call: LocalCall, plane: LocalPlane, ledger: Set<string>, taskDir: string | null): Promise<LocalOutcome> {
+export async function runLocal(call: LocalCall, plane: LocalPlane, ledger: Set<string>, taskDir: string | null, workspaceRoot?: string): Promise<LocalOutcome> {
   const started = Date.now();
   const dur = () => Date.now() - started;
   const resolve = (p?: string): string | undefined => {
@@ -83,7 +83,12 @@ export async function runLocal(call: LocalCall, plane: LocalPlane, ledger: Set<s
         return { ok: true, detail: `created ${path}`, text: null, durationMs: dur() };
       }
       case 'exec': {
-        const res = await plane.exec(call.cmd, call.timeoutMs, taskDir ?? undefined);
+        let cmd = call.cmd;
+        if (taskDir) {
+          cmd = cmd.split(taskDir + '/').join('./');
+          if (workspaceRoot) cmd = cmd.split(`${workspaceRoot}/${taskDir}/`).join('./');
+        }
+        const res = await plane.exec(cmd, call.timeoutMs, taskDir ?? undefined);
         const summary = `exit ${res.code} (${(res.durationMs / 1000).toFixed(1)}s)${res.timedOut ? ' - TIMED OUT' : ''}`;
         const text = res.output.trim();
         return { ok: res.code === 0, detail: summary, label: `exec ${call.cmd.slice(0, 80)}`, text: text ? `${summary}\n${text}` : null, durationMs: dur() };
