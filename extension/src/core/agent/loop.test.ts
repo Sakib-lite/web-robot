@@ -63,7 +63,7 @@ describe('runTask', () => {
 
     expect(result.status).toBe('done');
     expect(result.summary).toContain('opened offers');
-    expect(result.summary).toContain('distinct page states observed');
+    expect(result.summary).toContain('distinct page states,');
     expect(result.steps).toHaveLength(1);
     expect(result.steps[0]!.call).toBe('goto https://shop.dev/offers');
     expect(chat).toHaveBeenCalledTimes(2);
@@ -257,6 +257,22 @@ describe('runTask', () => {
     const result = await runTask('collect unis from the page', deps({ chat }));
     expect(result.status).toBe('done');
     expect(chat).toHaveBeenCalledTimes(1);
+  });
+
+  it('executes every tool call in a batched response, not just the first', async () => {
+    const acts: string[] = [];
+    const driver = fakeDriver({ act: async (action: Action) => { acts.push(action.type); return { ok: true, detail: 'did' }; } });
+    const chat = vi.fn(async (_messages: ChatMessage[]) =>
+      reply('', [toolCall('click', { ref: 'e1' }), toolCall('click', { ref: 'e2' }), toolCall('click', { ref: 'e3' })]),
+    ).mockResolvedValueOnceOnce;
+    const chat2 = vi.fn<never>()
+      .mockImplementationOnce(async () => reply('', [toolCall('click', { ref: 'e1' }), toolCall('click', { ref: 'e2' }), toolCall('click', { ref: 'e3' })]))
+      .mockImplementationOnce(async () => reply('', [toolCall('done', { summary: 'clicked all' })]));
+    const result = await runTask('click three rows', deps({ driver, chat: chat2 as never }));
+    expect(result.status).toBe('done');
+    expect(result.summary).toContain('3 distinct elements clicked');
+    expect(acts.filter((a) => a === 'click')).toHaveLength(3);
+    expect(chat2).toHaveBeenCalledTimes(2);
   });
 
   it('treats an aborted in-flight llm call as stopped, not failed', async () => {

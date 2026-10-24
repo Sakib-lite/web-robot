@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatResponse, ToolDef } from '../llm/chatClient';
+import type { ChatMessage, ChatResponse, ToolDef , ToolCall } from '../llm/chatClient';
 import type { Action, Driver, Snapshot } from '../driver/types';
 import type { LocalPlane } from '../local/plane';
 import { runLocal, type LocalOutcome } from './runLocal';
@@ -187,6 +187,8 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   let consecutiveReads = 0;
   const wantsWebResearch = /web[- ]search|search (?:each|every|the web)|from the web|from web|google it|search online/i.test(task);
   const domainsVisited = new Set<string>();
+  const clickedRefs = new Set<string>();
+  let pendingCalls: ToolCall[] = [];
   let researchBounce = false;
   let index = 0;
 
@@ -261,41 +263,46 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       });
     }
 
-    let res: ChatResponse;
-    const chatStarted = Date.now();
-    try {
-      res = await deps.chat(messages, toolDefs({ workspace: !!deps.workspace }));
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      await deps.telemetry?.llm(index + 1, { messages, error: reason, durationMs: Date.now() - chatStarted });
-      if (deps.signal?.aborted) return { status: 'stopped', reason: 'cancelled by user', steps };
-      return { status: 'failed', reason: `llm error: ${reason}`, steps };
-    }
-    await deps.telemetry?.llm(index + 1, {
-      messages,
-      responseContent: res.content,
-      toolCalls: res.toolCalls,
-      usage: res.usage ?? null,
-      durationMs: Date.now() - chatStarted,
-    });
+    let call: ToolCall;
+    if (pendingCalls.length > 0) {
+      call = pendingCalls.shift()!;
+    } else {
+      let res: ChatResponse;
+      const chatStarted = Date.now();
+      try {
+        res = await deps.chat(messages, toolDefs({ workspace: !!deps.workspace }));
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        await deps.telemetry?.llm(index + 1, { messages, error: reason, durationMs: Date.now() - chatStarted });
+        if (deps.signal?.aborted) return { status: 'stopped', reason: 'cancelled by user', steps };
+        return { status: 'failed', reason: `llm error: ${reason}`, steps };
+      }
+      await deps.telemetry?.llm(index + 1, {
+        messages,
+        responseContent: res.content,
+        toolCalls: res.toolCalls,
+        usage: res.usage ?? null,
+        durationMs: Date.now() - chatStarted,
+      });
 
-    if (res.toolCalls.length === 0) {
+      if (res.toolCalls.length === 0) {
       const empty = !res.content.trim();
       const reason = `model stopped calling tools${empty ? ' (empty replies)' : ''}: ${res.content.slice(0, 200)}`;
       noToolStrikes++;
       if (noToolStrikes >= 3) {
         return { status: 'failed', reason, steps };
       }
-      notes.push(
-        empty
-          ? 'Your last reply came back empty. Respond now by calling exactly one tool - done or fail if the task is finished or impossible. Never return a blank message.'
-          : 'You replied without calling a tool. You must call exactly one tool - done or fail if the task is finished or impossible.',
-      );
-      continue;
+        notes.push(
+          empty
+            ? 'Your last reply came back empty. Respond now by calling exactly one tool - done or fail if the task is finished or impossible. Never return a blank message.'
+            : 'You replied without calling a tool. You must call exactly one tool - done or fail if the task is finished or impossible.',
+        );
+        continue;
+      }
+      noToolStrikes = 0;
+      call = res.toolCalls[0]!;
+      if (res.toolCalls.length > 1) pendingCalls = res.toolCalls.slice(1);
     }
-    noToolStrikes = 0;
-
-    const call = res.toolCalls[0]!;
     const parsed = parseCall(call.name, call.args);
     if (!parsed.ok) {
       record(false, call.name, parsed.error);
@@ -335,7 +342,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
           .join('\n');
         if (list) summary = `${summary}\n\n**Files:**\n${list}`;
       }
-      const coverage = `\n\n**Coverage:** ${seenPageStates.size} distinct page states observed over ${steps.length} steps.`;
+      const coverage = `\n\n**Coverage:** ${seenPageStates.size} distinct page states, ${clickedRefs.size} distinct elements clicked, over ${steps.length} steps (runtime-counted, not model-reported).`;
       summary = `${summary}${coverage}`;
       return { status: 'done', summary, ...(agentCall.data !== undefined ? { data: agentCall.data } : {}), steps };
     }
@@ -424,6 +431,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     }
 
     const action = agentCall.action;
+    if (action.type === 'click') clickedRefs.add(action.ref);
     if (action.type === 'goto' || action.type === 'new_tab') {
       try {
         domainsVisited.add(new URL(action.url ?? 'about:blank', 'https://x.invalid').hostname);
