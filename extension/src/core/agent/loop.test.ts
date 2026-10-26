@@ -262,7 +262,8 @@ describe('runTask', () => {
   it('executes every tool call in a batched response, not just the first', async () => {
     const acts: string[] = [];
     const driver = fakeDriver({ act: async (action: Action) => { acts.push(action.type); return { ok: true, detail: 'did' }; } });
-    const chat = vi.fn<never>()
+    const chat = vi.fn(async (_messages: ChatMessage[]) => reply('', [toolCall('done', { summary: 'clicked all' })]));
+    vi.mocked(chat)
       .mockImplementationOnce(async () => reply('', [toolCall('click', { ref: 'e1' }), toolCall('click', { ref: 'e2' }), toolCall('click', { ref: 'e3' })]))
       .mockImplementationOnce(async () => reply('', [toolCall('done', { summary: 'clicked all' })]));
     const result = await runTask('click three rows', deps({ driver, chat: chat as never }));
