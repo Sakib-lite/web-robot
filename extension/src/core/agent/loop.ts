@@ -48,7 +48,7 @@ const LOOP_NUDGE_AT = 3;
 const LOOP_BLOCK_AT = 5;
 const STALL_LIMIT = 6;
 
-const DANGER_PATTERN = /pay|purchase|order|buy|checkout|delete|remove|submit|post|send|confirm/i;
+const DANGER_PATTERN = /\b(pay|purchase|buy|checkout|delete|remove|submit|post|send|confirm)\b|\bplace (?:an )?order\b/i;
 
 const MAX_LOCAL_CONTEXT = 12000;
 const TAB_BUDGET = 6;

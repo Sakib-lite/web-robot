@@ -42,11 +42,20 @@ function deps(over: Partial<LoopDeps> = {}): LoopDeps {
 }
 
 describe('isDangerous', () => {
-  const snap = snapshot({ elements: [{ ref: 'e1', tag: 'button', kind: 'button', name: 'Place order' }, { ref: 'e2', tag: 'button', kind: 'button', name: 'Details' }] });
+  const snap = snapshot({ elements: [
+    { ref: 'e1', tag: 'button', kind: 'button', name: 'Place order' },
+    { ref: 'e2', tag: 'button', kind: 'button', name: 'Details' },
+    { ref: 'e3', tag: 'button', kind: 'button', name: 'Multiple Ph.D. student or postdoc positions Drexel University' },
+    { ref: 'e4', tag: 'button', kind: 'button', name: 'Submit application' },
+    { ref: 'e5', tag: 'button', kind: 'button', name: 'Postdoc openings in order of deadline' },
+  ] });
 
-  it('flags submit-like clicks and ignores safe ones', () => {
+  it('flags submit-like clicks, ignores safe ones and postdoc-titled rows', () => {
     expect(isDangerous({ type: 'click', ref: 'e1' }, snap)).toBe('click "Place order"');
     expect(isDangerous({ type: 'click', ref: 'e2' }, snap)).toBeNull();
+    expect(isDangerous({ type: 'click', ref: 'e3' }, snap)).toBeNull();
+    expect(isDangerous({ type: 'click', ref: 'e4' }, snap)).toContain('Submit application');
+    expect(isDangerous({ type: 'click', ref: 'e5' }, snap)).toBeNull();
     expect(isDangerous({ type: 'fill', ref: 'e2', text: 'x' }, snap)).toBeNull();
     expect(isDangerous({ type: 'click', ref: 'e9' }, snap)).toBeNull();
   });
