@@ -7,7 +7,7 @@ export type AgentCall =
   | { kind: 'observe'; skip?: number }
   | { kind: 'note'; text: string }
   | { kind: 'local'; call: LocalCall }
-  | { kind: 'ask_user'; question: string }
+  | { kind: 'ask_user'; question: string; recommended?: string }
   | { kind: 'done'; summary: string; data?: unknown }
   | { kind: 'fail'; reason: string };
 
@@ -61,7 +61,7 @@ export const toolSpecs = {
   wait: { description: 'Wait before the next observation, at most 5000 ms.', schema: z.object({ ms: z.number().int().min(0).max(5000) }) },
   note: { description: 'Record a durable finding or plan update (e.g. "UIC: PTE 54 verified at mscs.uic.edu"). Notes stay visible for the rest of the task - use them as your working memory.', schema: z.object({ text: z.string() }) },
   snapshot: { description: 'Re-read the current page observation. Use skip to page through a long element list: if the header says "showing 1-80 of 200", call with skip=80 for the next page; refs from other pages stay clickable.', schema: z.object({ skip: z.number().int().min(0).optional() }) },
-  ask_user: { description: 'Ask the user a question when blocked, or to confirm an irreversible action.', schema: z.object({ question: z.string() }) },
+  ask_user: { description: 'Ask the user a question when blocked, or to confirm an irreversible action. ALWAYS include your recommended default in recommended - after 30s without an answer the runtime applies it automatically and continues.', schema: z.object({ question: z.string(), recommended: z.string().optional() }) },
   done: { description: 'Finish the task with a summary written in markdown (use - bullets for lists, 1. numbering for ordered items, **bold** for key facts) and optional extracted data.', schema: z.object({ summary: z.string(), data: z.unknown().optional() }) },
   fail: { description: 'Give up on the task and explain why.', schema: z.object({ reason: z.string() }) },
   list_dir: { description: 'List a directory in your local workspace (path relative to the workspace root, default "."). Dirs first, with sizes and dates.', schema: z.object({ path: z.string().optional() }) },
@@ -196,7 +196,7 @@ export function parseCall(name: string, args: Record<string, unknown>): { ok: tr
     case 'note':
       return { ok: true, call: { kind: 'note', text: String(a.text) } };
     case 'ask_user':
-      return { ok: true, call: { kind: 'ask_user', question: String(a.question) } };
+      return { ok: true, call: { kind: 'ask_user', question: String(a.question), ...(a.recommended !== undefined ? { recommended: String(a.recommended) } : {}) } };
     case 'done':
       return { ok: true, call: { kind: 'done', summary: String(a.summary), ...(a.data !== undefined ? { data: a.data } : {}) } };
     case 'fail':

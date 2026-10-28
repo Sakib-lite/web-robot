@@ -52,11 +52,11 @@ export async function startTelemetry(meta: TaskMeta, backendUrl: string): Promis
 
 const REMOTE_ANSWER = '(remote run: no user available - proceed autonomously, but never take irreversible actions like paying, submitting orders, deleting, or posting)';
 
-const ASK_WAIT_MS = 120_000;
+const ASK_WAIT_MS = 30_000;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function makeRemoteAsk(taskId: number, backendUrl: string): (question: string) => Promise<string> {
-  return async (question: string) => {
+function makeRemoteAsk(taskId: number, backendUrl: string): (question: string, recommended?: string) => Promise<string> {
+  return async (question: string, recommended?: string) => {
     try {
       const res = await post(`${backendUrl}/tasks/${taskId}/ask`, { step: 0, question });
       const { id } = (await res.json()) as { id: number };
@@ -70,7 +70,7 @@ function makeRemoteAsk(taskId: number, backendUrl: string): (question: string) =
       }
     } catch {
     }
-    return REMOTE_ANSWER;
+    return recommended ? `${recommended} (auto-applied after 30s without an answer)` : REMOTE_ANSWER;
   };
 }
 

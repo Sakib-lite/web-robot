@@ -109,9 +109,21 @@ describe('runTask', () => {
       .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'ok' })]));
     await runTask('send an email', deps({ chat, askUser }));
 
-    expect(askUser).toHaveBeenCalledWith('which email provider?');
+    expect(askUser).toHaveBeenCalledWith('which email provider?', undefined);
     const secondContext = (chat.mock.calls[1]![0] as import('../llm/chatClient').ChatMessage[]).map((m) => m.content ?? '').join('\n');
     expect(secondContext).toContain('use gmail');
+  });
+
+  it('auto-applies the recommended answer when the user never replies', async () => {
+    const askUser = vi.fn(async () => null);
+    const chat = vi.fn<never>()
+      .mockImplementationOnce(async () => reply('', [toolCall('ask_user', { question: 'which site?', recommended: 'use phd.com/app' })]))
+      .mockImplementationOnce(async () => reply('', [toolCall('done', { summary: 'done with the default' })]));
+    const result = await runTask('do the thing', deps({ chat: chat as never, askUser }));
+    expect(result.status).toBe('done');
+    const q = (chat.mock.calls[1]![0] as ChatMessage[]).map((m) => m.content ?? '').join('\n');
+    expect(q).toContain('auto-applied after 30s');
+    expect(q).toContain('use phd.com/app');
   });
 
   it('stops when the user dismisses a question', async () => {

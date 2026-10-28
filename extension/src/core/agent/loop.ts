@@ -31,7 +31,7 @@ export interface LoopTelemetry {
 export interface LoopDeps {
   driver: Driver;
   chat: (messages: ChatMessage[], tools: ToolDef[]) => Promise<ChatResponse>;
-  askUser: (question: string) => Promise<string | null>;
+  askUser: (question: string, recommended?: string) => Promise<string | null>;
   maxSteps?: number;
   signal?: AbortSignal;
   onStep?: (step: StepRecord) => void;
@@ -350,9 +350,17 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       return { status: 'failed', reason: agentCall.reason, steps };
     }
     if (agentCall.kind === 'ask_user') {
-      const answer = await deps.askUser(agentCall.question);
-      if (answer === null) return { status: 'stopped', reason: 'user dismissed the question', steps };
-      userAnswers.push(`question: ${agentCall.question}\nanswer: ${answer}`);
+      const answer = await deps.askUser(agentCall.question, agentCall.recommended);
+      if (answer === null) {
+        if (agentCall.recommended) {
+          userAnswers.push(`question: ${agentCall.question}\nanswer: ${agentCall.recommended}\n(auto-applied after 30s without a user answer - the recommendation you supplied was used)`);
+          notes.push('The user did not answer in 30s; your recommended default was applied automatically. Continue with it.');
+        } else {
+          return { status: 'stopped', reason: 'user dismissed the question and no recommendation was given', steps };
+        }
+      } else {
+        userAnswers.push(`question: ${agentCall.question}\nanswer: ${answer}`);
+      }
       await deps.telemetry?.answer(index + 1, { question: agentCall.question, answer });
       record(true, 'ask_user', `"${agentCall.question}" → "${answer}"`);
       index++;
@@ -442,6 +450,11 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     if (danger) {
       const answer = await deps.askUser(`Allow web-robot to ${danger}? (yes/no)`);
       if (answer === null) return { status: 'stopped', reason: 'user dismissed the confirmation', steps };
+      if (answer === null) {
+        record(false, describeAction(action), `no answer within 30s - skipped (safe default): ${danger}`);
+        index++;
+        continue;
+      }
       if (!/^\s*(y|yes|ok|allow)\b/i.test(answer)) {
         record(false, describeAction(action), `user declined ${danger}`);
         index++;
