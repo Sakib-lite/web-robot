@@ -116,9 +116,9 @@ describe('runTask', () => {
 
   it('auto-applies the recommended answer when the user never replies', async () => {
     const askUser = vi.fn(async () => null);
-    const chat = vi.fn<never>()
-      .mockImplementationOnce(async () => reply('', [toolCall('ask_user', { question: 'which site?', recommended: 'use phd.com/app' })]))
-      .mockImplementationOnce(async () => reply('', [toolCall('done', { summary: 'done with the default' })]));
+    const chat = vi.fn(async (_messages: ChatMessage[]) => reply('', [toolCall('done', { summary: 'done with the default' })]));
+    vi.mocked(chat)
+      .mockImplementationOnce(async () => reply('', [toolCall('ask_user', { question: 'which site?', recommended: 'use phd.com/app' })]));
     const result = await runTask('do the thing', deps({ chat: chat as never, askUser }));
     expect(result.status).toBe('done');
     const q = (chat.mock.calls[1]![0] as ChatMessage[]).map((m) => m.content ?? '').join('\n');
