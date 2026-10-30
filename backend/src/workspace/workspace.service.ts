@@ -368,7 +368,10 @@ export class WorkspaceService implements OnModuleInit {
 
     return await new Promise<ExecResult>((resolve) => {
 
-      const child = spawn('bash', ['--noprofile', '--norc', '-c', cmd], { cwd: runDir });
+      const child = spawn('bash', ['--noprofile', '--norc', '-c', cmd], {
+        cwd: runDir,
+        env: { ...process.env, PATH: `/usr/local/bin:/opt/homebrew/bin:${process.env.PATH ?? '/usr/bin:/bin:/usr/sbin:/sbin'}` },
+      });
       let timedOut = false;
 
       const KEEP = EXEC_OUTPUT_CAP;
