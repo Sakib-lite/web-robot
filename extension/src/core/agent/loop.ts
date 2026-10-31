@@ -185,6 +185,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   let notes: string[] = [];
   let noToolStrikes = 0;
   let consecutiveReads = 0;
+  let execStreak = 0;
   const wantsWebResearch = /web[- ]search|search (?:each|every|the web)|from the web|from web|google it|search online/i.test(task);
   const domainsVisited = new Set<string>();
   const clickedRefs = new Set<string>();
@@ -311,6 +312,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     }
 
     const agentCall = parsed.call;
+    if (!(agentCall.kind === 'local' && agentCall.call.op === 'exec')) execStreak = 0;
     const isRead = agentCall.kind === 'action' && agentCall.action.type === 'extract'
       || agentCall.kind === 'observe'
       || (agentCall.kind === 'local' && (agentCall.call.op === 'read_file' || agentCall.call.op === 'list_dir'));
@@ -391,6 +393,18 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
         index++;
         continue;
       }
+      const execStreakBlocked = agentCall.call.op === 'exec' && execStreak >= 8;
+      if (execStreakBlocked) {
+        record(false, describeLocal(agentCall.call), 'blocked: 8 shell commands in a row with nothing recorded - probes and re-checks are done; record results or act in the browser');
+        notes.push('You have run 8 shell commands in a row without writing anything down. Stop probing. Either append_file the findings/deliverable from what the commands already showed, or take a browser/page action. Repeated probing is blocked.');
+        consecutiveBlocked++;
+        if (consecutiveBlocked >= STALL_LIMIT) {
+          return { status: 'failed', reason: 'stalled: exec probing ignored the recording requirement', steps };
+        }
+        index++;
+        continue;
+      }
+      if (agentCall.call.op === 'exec') execStreak++;
       const guard = execSpiralGuard(agentCall.call, execCount, fileOps, notes);
       const cmdBlocked = agentCall.call.op === 'exec' && blockedExecCmds.has(agentCall.call.cmd);
       if (guard === 'blocked' || cmdBlocked) {

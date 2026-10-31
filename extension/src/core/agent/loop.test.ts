@@ -294,6 +294,20 @@ describe('runTask', () => {
     expect(chat).toHaveBeenCalledTimes(2);
   });
 
+  it('blocks a ninth consecutive exec probe until something is recorded', async () => {
+    const plane = fakePlane({ exec: async (cmd: string) => ({ code: 0, output: `ran ${cmd}`, timedOut: false, durationMs: 2 }) });
+    let n = 0;
+    const chat = vi.fn(async (_messages: ChatMessage[]) => {
+      n++;
+      return reply('', [toolCall('exec', { cmd: `probe number ${n}` })]);
+    });
+    const result = await runTask('probe forever', deps({ chat, workspace: { plane, root: '/tmp/robots' } }));
+    expect(result.status).toBe('failed');
+    expect(result.reason).toContain('exec probing');
+    const noteSeen = chat.mock.calls.some((c) => (c[0] as ChatMessage[]).some((m) => m.content?.includes('Stop probing')));
+    expect(noteSeen).toBe(true);
+  });
+
   it('treats an aborted in-flight llm call as stopped, not failed', async () => {
     const controller = new AbortController();
     const chat = async () => {
@@ -797,7 +811,7 @@ describe('exec spiral guard + rolling exec memory', () => {
     expect(result.steps.some((s) => !s.ok && s.detail.includes('identical failing command'))).toBe(true);
   });
 
-  it('nudges at 20 ops on one file and blocks exec touching it at 35', async () => {
+  it('stops endless file-slicing execs (streak guard, then spiral fence)', async () => {
     const plane = fakePlane();
     const chat = vi.fn(async (_messages: import('../llm/chatClient').ChatMessage[], _tools: unknown[]) => {
       const n = chat.mock.calls.length;
@@ -806,27 +820,32 @@ describe('exec spiral guard + rolling exec memory', () => {
     });
     const result = await runTask('parse the file', wsDepsLocal({ chat, plane }));
 
-    expect(result.status).toBe('done');
-    const blocked = result.steps.filter((s) => !s.ok && s.detail.includes('spiral guard'));
+    expect(result.status).toBe('failed');
+    expect(result.reason).toContain('exec probing');
+    const blocked = result.steps.filter((s) => !s.ok && (s.detail.includes('spiral guard') || s.detail.includes('nothing recorded')));
     expect(blocked.length).toBeGreaterThanOrEqual(1);
     const contexts = chat.mock.calls.map((c) => (c[0] as import('../llm/chatClient').ChatMessage[]).map((m) => m.content ?? '').join('\n'));
-    expect(contexts.some((c) => c.includes('write ONE python script'))).toBe(true);
     expect(contexts.some((c) => c.includes('RECENT EXEC RESULTS'))).toBe(true);
   });
 
   it('keeps only the last 10 exec digests in context', async () => {
     const plane = fakePlane();
-    const chat = vi.fn(async (_messages: import('../llm/chatClient').ChatMessage[], _tools: unknown[]) => {
-      const n = chat.mock.calls.length;
-      if (n <= 12) return reply('', [toolCall('exec', { cmd: `echo result-${n}` })]);
-      return reply('', [toolCall('done', { summary: 'x' })]);
+    let execs = 0;
+    let calls = 0;
+    const chat = vi.fn(async () => {
+      calls++;
+      if (calls > 15) return reply('', [toolCall('done', { summary: 'x' })]);
+      if (calls % 4 === 0) return reply('', [toolCall('note', { text: `note ${calls}` })]);
+      execs++;
+      return reply('', [toolCall('exec', { cmd: `echo r${execs}` })]);
     });
-    await runTask('t', wsDepsLocal({ chat, plane }));
-    const last = (chat.mock.calls[12]![0] as import('../llm/chatClient').ChatMessage[]).map((m) => m.content ?? '').join('\n');
+    await runTask('t', wsDepsLocal({ chat: chat as never, plane }));
+    const last = (chat.mock.calls.at(-1)![0] as import('../llm/chatClient').ChatMessage[]).map((m) => m.content ?? '').join('\n');
     const block = last.slice(last.lastIndexOf('RECENT EXEC RESULTS'));
-    expect(block).toContain('result-12 ->');
-    expect(block).toContain('result-3 ->');
-    expect(block).not.toContain('result-2 ->');
-    expect(block).not.toContain('result-1 ->');
+    expect(execs).toBeGreaterThanOrEqual(11);
+    expect(block).not.toContain('r1 ->');
+    expect(block).not.toContain('r2 ->');
+    expect(block).toContain('r3 ->');
+    expect(block).toContain(`r${execs} ->`);
   });
 });
