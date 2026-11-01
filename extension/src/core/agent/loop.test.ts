@@ -840,7 +840,8 @@ describe('exec spiral guard + rolling exec memory', () => {
       return reply('', [toolCall('exec', { cmd: `echo r${execs}` })]);
     });
     await runTask('t', wsDepsLocal({ chat: chat as never, plane }));
-    const last = (chat.mock.calls.at(-1)![0] as import('../llm/chatClient').ChatMessage[]).map((m) => m.content ?? '').join('\n');
+    const lastCall = chat.mock.calls.at(-1) as unknown as [import('../llm/chatClient').ChatMessage[]];
+    const last = lastCall[0]!.map((m) => m.content ?? '').join('\n');
     const block = last.slice(last.lastIndexOf('RECENT EXEC RESULTS'));
     expect(execs).toBeGreaterThanOrEqual(11);
     expect(block).not.toContain('r1 ->');
