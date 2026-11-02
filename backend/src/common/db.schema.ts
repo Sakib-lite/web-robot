@@ -65,6 +65,7 @@ CREATE INDEX IF NOT EXISTS task_messages_task_idx ON task_messages(task_id, id);
 `;
 
 export const MIGRATIONS = [
+  'ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS thinking text',
   `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS skill TEXT`,
   `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS attempts INT NOT NULL DEFAULT 0`,
   `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS context TEXT`,

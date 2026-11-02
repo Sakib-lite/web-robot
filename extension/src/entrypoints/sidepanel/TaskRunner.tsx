@@ -428,6 +428,12 @@ export default function TaskRunner({
               <span className="step-body">
                 <span className="step-call">{step.call}</span>
                 <span className="muted">{step.detail}</span>
+                {step.thinking && (
+                  <details className="step-thinking" open>
+                    <summary>thinking</summary>
+                    <pre>{step.thinking}</pre>
+                  </details>
+                )}
               </span>
             </li>
           ))}

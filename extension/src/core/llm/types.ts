@@ -30,6 +30,7 @@ export interface ChatRequest {
 
 export interface ChatResponse {
   content: string;
+  thinking?: string;
   toolCalls: ToolCall[];
   usage?: { inputTokens?: number; outputTokens?: number };
 }

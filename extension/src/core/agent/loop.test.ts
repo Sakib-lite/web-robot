@@ -83,6 +83,12 @@ describe('runTask', () => {
     expect(context).toContain('goto https://shop.dev/offers');
   });
 
+  it('attaches model thinking to the step that executes its call', async () => {
+    const chat = vi.fn(async (_messages: ChatMessage[]) => ({ content: '', thinking: 'I should click the first row', toolCalls: [toolCall('goto', { url: 'https://x.dev' })] }));
+    const result = await runTask('go', deps({ chat }));
+    expect(result.steps[0]!.thinking).toBe('I should click the first row');
+  });
+
   it('fails when the model calls fail', async () => {
     const chat = async () => reply('', [toolCall('fail', { reason: 'login wall' })]);
     const result = await runTask('do the thing', deps({ chat }));

@@ -92,6 +92,16 @@ describe('chatCompletion wire behavior per product', () => {
     await expect(call).rejects.toThrow('llm request failed (401)');
   });
 
+  it('captures model thinking from reasoning_content and reasoning fields', async () => {
+    const glmBody = { choices: [{ message: { content: 'ok', reasoning_content: 'step one: consider the page', tool_calls: [] } }] };
+    const res = await chatCompletion(provider(), { messages: [] }, async () => jsonResponse(200, glmBody));
+    expect(res.thinking).toBe('step one: consider the page');
+
+    const ollamaBody = { choices: [{ message: { content: 'ok', reasoning: 'ollama style thinking' } }] };
+    const res2 = await chatCompletion(provider({ productId: 'generic' }), { messages: [] }, async () => jsonResponse(200, ollamaBody));
+    expect(res2.thinking).toBe('ollama style thinking');
+  });
+
   it('throws on invalid json bodies', async () => {
     const call = chatCompletion(provider(), { messages: [] }, async () => new Response('not json', { status: 200 }));
     await expect(call).rejects.toThrow('invalid json');

@@ -44,12 +44,13 @@ export class TasksService {
     });
   }
 
-  async addLlmCall(taskId: number, step: number, data: { messages: unknown; responseContent?: string; toolCalls?: unknown; usage?: unknown; durationMs?: number; error?: string }) {
+  async addLlmCall(taskId: number, step: number, data: { messages: unknown; responseContent?: string; thinking?: string; toolCalls?: unknown; usage?: unknown; durationMs?: number; error?: string }) {
     await this.llmCalls.save({
       taskId,
       step,
       messages: data.messages,
       responseContent: data.responseContent ?? null,
+      thinking: data.thinking ?? null,
       toolCalls: data.toolCalls ?? null,
       usage: data.usage ?? null,
       durationMs: data.durationMs ?? null,

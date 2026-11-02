@@ -30,6 +30,8 @@ function toWireMessage(message: ChatMessage) {
 interface WireChoice {
   message?: {
     content?: string | null;
+    reasoning_content?: string | null;
+    reasoning?: string | null;
     tool_calls?: Array<{ id?: string; function?: { name?: string; arguments?: string } }>;
   };
 }
@@ -91,8 +93,10 @@ export async function chatCompletion(
   }
 
   const choice = parsed.choices?.[0]?.message;
+  const thinking = choice?.reasoning_content?.trim() || choice?.reasoning?.trim() || undefined;
   return {
     content: choice?.content ?? '',
+    ...(thinking ? { thinking } : {}),
     toolCalls: choice?.tool_calls?.map(parseToolCall) ?? [],
     ...(parsed.usage
       ? { usage: { inputTokens: parsed.usage.prompt_tokens, outputTokens: parsed.usage.completion_tokens } }

@@ -758,3 +758,25 @@ select {
 /* collapsible task-input + chat sections share the settings accordion look */
 .runner .card-head { margin-bottom: 0.5rem; }
 .chat-section { margin-top: 0.3rem; }
+
+
+.step-thinking {
+  margin-top: 4px;
+  border-left: 2px solid var(--border, #d4d4d8);
+  padding-left: 8px;
+}
+.step-thinking summary {
+  cursor: pointer;
+  font-size: 11px;
+  opacity: 0.7;
+  user-select: none;
+}
+.step-thinking pre {
+  margin: 4px 0 0;
+  max-height: 8rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 11px;
+  line-height: 1.45;
+  opacity: 0.85;
+}

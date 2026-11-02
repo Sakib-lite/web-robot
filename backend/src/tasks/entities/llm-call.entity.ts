@@ -22,6 +22,9 @@ export class LlmCall {
   @Column({ name: 'response_content', type: 'text', nullable: true })
   responseContent!: string | null;
 
+  @Column({ type: 'text', nullable: true })
+  thinking!: string | null;
+
   @Column({ name: 'tool_calls', type: 'jsonb', nullable: true })
   toolCalls!: unknown;
 

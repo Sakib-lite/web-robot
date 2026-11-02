@@ -7,6 +7,7 @@ import { describeLocal, parseCall, toolDefs, type LocalCall } from './tools';
 import { observationBlock, systemPrompt, taskContext } from './prompts';
 
 export interface StepRecord {
+  thinking?: string;
   index: number;
   call: string;
   detail: string;
@@ -193,8 +194,11 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   let researchBounce = false;
   let index = 0;
 
+  let pendingThinking: string | null = null;
+
   function record(ok: boolean, call: string, detail: string) {
-    const step: StepRecord = { index: index + 1, call, detail, ok };
+    const step: StepRecord = { index: index + 1, call, detail, ok, ...(pendingThinking ? { thinking: pendingThinking } : {}) };
+    pendingThinking = null;
     steps.push(step);
     stepLines.push(ok ? `${step.call} → ${detail}` : `${step.call} → failed: ${detail}`);
     deps.onStep?.(step);
@@ -280,6 +284,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       }
       await deps.telemetry?.llm(index + 1, {
         messages,
+        ...(res.thinking ? { thinking: res.thinking } : {}),
         responseContent: res.content,
         toolCalls: res.toolCalls,
         usage: res.usage ?? null,
@@ -302,6 +307,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       }
       noToolStrikes = 0;
       call = res.toolCalls[0]!;
+      if (res.thinking) pendingThinking = res.thinking.slice(0, 2000);
       if (res.toolCalls.length > 1) pendingCalls = res.toolCalls.slice(1);
     }
     const parsed = parseCall(call.name, call.args);
