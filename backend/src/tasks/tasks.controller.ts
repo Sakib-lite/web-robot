@@ -46,6 +46,11 @@ export class TasksController {
     return this.tasks.listTasks(limit ? Number(limit) : 50);
   }
 
+  @Get('tasks/:id/live')
+  live(@Param('id', ParseIntPipe) id: number) {
+    return this.tasks.liveTrace(id);
+  }
+
   @Get('tasks/:id/debug')
   debug(@Param('id', ParseIntPipe) id: number) {
     return this.tasks.getDebugReport(id);

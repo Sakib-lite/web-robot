@@ -780,3 +780,46 @@ select {
   line-height: 1.45;
   opacity: 0.85;
 }
+
+
+.live-trace {
+  border: 1px solid var(--border, #d4d4d8);
+  border-radius: 8px;
+  margin: 8px 0;
+  overflow: hidden;
+}
+.live-trace-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border, #d4d4d8);
+}
+.live-trace-body {
+  max-height: 38vh;
+  overflow: auto;
+  padding: 6px 10px;
+}
+.live-step {
+  margin: 6px 0;
+}
+.live-step-call {
+  font-size: 12px;
+  font-weight: 600;
+}
+.live-thinking {
+  margin: 3px 0 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--border, #d4d4d8);
+  white-space: pre-wrap;
+  font-size: 11px;
+  line-height: 1.45;
+  max-height: 6rem;
+  overflow: auto;
+  opacity: 0.85;
+}
+.live-content {
+  padding-left: 8px;
+}

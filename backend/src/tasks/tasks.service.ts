@@ -107,6 +107,21 @@ export class TasksService {
     }));
   }
 
+  async liveTrace(taskId: number, limit = 8) {
+    const task = await this.tasks.findOneBy({ id: taskId });
+    if (!task) throw new NotFoundException(`task ${taskId} not found`);
+    const rows = await this.llmCalls.find({ where: { taskId }, order: { id: 'DESC' }, take: limit });
+    const calls = rows.reverse().map((row) => ({
+      step: row.step,
+      thinking: row.thinking ?? null,
+      content: row.responseContent ?? '',
+      tool: Array.isArray(row.toolCalls) && row.toolCalls.length ? (row.toolCalls as Array<{ name?: string }>)[0]?.name ?? null : null,
+      error: row.error ?? null,
+      createdAt: row.createdAt,
+    }));
+    return { id: taskId, status: task.status, stepCount: task.stepCount, calls };
+  }
+
   async getDebugReport(taskId: number) {
     const task = await this.tasks.findOneBy({ id: taskId });
     if (!task) throw new NotFoundException(`task ${taskId} not found`);

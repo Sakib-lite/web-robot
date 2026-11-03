@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import SettingsView from './SettingsView';
 import TaskRunner, { type RunState } from './TaskRunner';
+import { LiveTrace } from './LiveTrace';
 import { useProviders } from './useProviders';
 import { maybeRunRemoteWork, panelRemoteDeps } from '@/core/remote/worker';
 import { getBackendUrl } from '@/core/telemetry/settings';
@@ -11,6 +12,7 @@ export default function App() {
   const [remoteState, setRemoteState] = useState('idle');
   const [backendError, setBackendError] = useState<string | null>(null);
   const [manualRun, setManualRun] = useState<RunState | null>(null);
+  const [remoteTaskId, setRemoteTaskId] = useState<number | null>(null);
   const baseDeps = useRef(panelRemoteDeps());
   const promptedAsk = useRef<number | null>(null);
 
@@ -84,8 +86,10 @@ export default function App() {
         try {
           await unwrapped.runTask(claim, backendUrl);
           setRemoteState(`task finished · trace #${claim.taskId}`);
+          setRemoteTaskId(null);
         } catch (error) {
           setRemoteState(`claim error (stays until next claim): ${error instanceof Error ? error.message : String(error)}`);
+          setRemoteTaskId(null);
           throw error;
         }
       },
@@ -127,6 +131,7 @@ export default function App() {
         </nav>
       </header>
       {remoteState !== 'idle' && !remoteRunning && <div className="note ok small">{remoteState}</div>}
+      {remoteRunning && remoteTaskId !== null && <LiveTrace taskId={remoteTaskId} />}
       {view === 'task' ? (
         <TaskRunner store={store} configs={configs} customModels={customModels} onRunningChange={setManualRun} />
       ) : (
