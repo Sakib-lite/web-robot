@@ -14,6 +14,25 @@ describe('toolDefs', () => {
       expect(def.parameters.$schema).toBeUndefined();
     }
   });
+
+  it('offers spawn_agent only when spawns are wired', () => {
+    expect(toolDefs().map((d) => d.name)).not.toContain('spawn_agent');
+    expect(toolDefs({ spawn: true }).map((d) => d.name)).toContain('spawn_agent');
+    expect(toolDefs({ spawn: true, research: true }).map((d) => d.name)).not.toContain('spawn_agent');
+  });
+
+  it('narrows research runs to read-only browsing tools', () => {
+    const names = toolDefs({ research: true }).map((d) => d.name);
+    expect(names).toContain('goto');
+    expect(names).toContain('new_tab');
+    expect(names).toContain('click');
+    expect(names).toContain('extract');
+    expect(names).toContain('snapshot');
+    expect(names).toContain('done');
+    expect(names).not.toContain('ask_user');
+    expect(names).not.toContain('exec');
+    expect(names).not.toContain('write_file');
+  });
 });
 
 describe('parseCall', () => {
@@ -66,6 +85,19 @@ describe('parseCall', () => {
       ok: true,
       call: { kind: 'note', text: 'UIC: PTE 54' },
     });
+  });
+
+  it('parses spawn_agent calls and rejects out-of-range budgets', () => {
+    expect(parseCall('spawn_agent', { task: 'research UIC admissions' })).toEqual({
+      ok: true,
+      call: { kind: 'spawn', task: 'research UIC admissions' },
+    });
+    expect(parseCall('spawn_agent', { task: 'x', budget: 12 })).toEqual({
+      ok: true,
+      call: { kind: 'spawn', task: 'x', budget: 12 },
+    });
+    expect(parseCall('spawn_agent', { task: 'x', budget: 3 }).ok).toBe(false);
+    expect(parseCall('spawn_agent', {}).ok).toBe(false);
   });
 
   it('rejects unknown tools and invalid arguments', () => {

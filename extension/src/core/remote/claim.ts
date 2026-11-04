@@ -9,7 +9,7 @@ import { runRemoteTask } from '../telemetry/client';
 export async function runClaimedTask(
   claim: ClaimedTask,
   backendUrl: string,
-  driver: ReturnType<typeof createDriver>,
+  makeDriver: () => ReturnType<typeof createDriver>,
 ): Promise<void> {
   const { taskId, taskText, skill, context, steps, lastMessage } = claim;
   const taskEffort = claim.effort;
@@ -83,7 +83,7 @@ export async function runClaimedTask(
   if (resume) preamble = preamble ? `${preamble}\n\n${resume}` : resume;
   await runRemoteTask(taskId, taskText, backendUrl, {
     provider,
-    driver,
+    makeDriver,
     ...(maxSteps ? { maxSteps } : {}),
     ...(preamble ? { preamble } : {}),
     ...(steps?.length ? { steps } : {}),

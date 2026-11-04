@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { runTask, type StepRecord, type TaskResult } from '@/core/agent/loop';
 import { planTask } from '@/core/agent/planner';
+import { makeSpawner } from '@/core/agent/subagent';
 import { createExtensionDriver } from '@/core/driver/extensionDriver';
 import { createHttpPlane } from '@/core/local/httpPlane';
 import { chatCompletion, type ChatMessage, type ChatResponse, type ToolDef } from '@/core/llm/chatClient';
@@ -169,6 +170,14 @@ export default function TaskRunner({
     if (telemetry.taskId) void heartbeat('busy');
     const heartbeatTimer = telemetry.taskId ? setInterval(() => void heartbeat('busy'), 15000) : null;
 
+    const pushStep = (step: StepRecord) => {
+      setSteps((prev) => {
+        const next = [...prev, step];
+        onRunningChange({ stepCount: next.length, snippet: task.slice(0, 60) });
+        return next;
+      });
+    };
+
     let taskResult: TaskResult | null = null;
     try {
       taskResult = await runTask(taskText, {
@@ -177,18 +186,13 @@ export default function TaskRunner({
         askUser,
         signal: controller.signal,
         telemetry,
+        spawn: makeSpawner({ makeDriver: createExtensionDriver, chat: skillChat, telemetry, signal: controller.signal, onStep: pushStep }),
         ...(workspace ? { workspace } : {}),
         ...(telemetry.taskId ? { taskId: telemetry.taskId } : {}),
         ...(effectiveSteps.length ? { steps: effectiveSteps } : {}),
         ...(preamble ? { preamble } : {}),
         ...(skillMaxSteps ? { maxSteps: skillMaxSteps } : {}),
-        onStep: (step) => {
-          setSteps((prev) => {
-            const next = [...prev, step];
-            onRunningChange({ stepCount: next.length, snippet: task.slice(0, 60) });
-            return next;
-          });
-        },
+        onStep: pushStep,
       });
       setResult(taskResult);
     } catch (e) {

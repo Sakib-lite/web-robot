@@ -4,7 +4,7 @@ import type { LocalPlane } from '../local/plane';
 import { runLocal, type LocalOutcome } from './runLocal';
 import { PlaneError } from '../local/plane';
 import { describeLocal, parseCall, toolDefs, type LocalCall } from './tools';
-import { observationBlock, systemPrompt, taskContext } from './prompts';
+import { observationBlock, subagentPrompt, systemPrompt, taskContext } from './prompts';
 
 export interface StepRecord {
   thinking?: string;
@@ -33,6 +33,10 @@ export interface LoopDeps {
   driver: Driver;
   chat: (messages: ChatMessage[], tools: ToolDef[]) => Promise<ChatResponse>;
   askUser: (question: string, recommended?: string) => Promise<string | null>;
+  spawn?: (task: string, budget?: number) => Promise<string>;
+  research?: boolean;
+  tabBudget?: number;
+  maxSpawns?: number;
   maxSteps?: number;
   signal?: AbortSignal;
   onStep?: (step: StepRecord) => void;
@@ -48,6 +52,7 @@ const DEFAULT_MAX_STEPS = 400;
 const LOOP_NUDGE_AT = 3;
 const LOOP_BLOCK_AT = 5;
 const STALL_LIMIT = 6;
+const MAX_SPAWNS = 60;
 
 const DANGER_PATTERN = /\b(pay|purchase|buy|checkout|delete|remove|submit|post|send|confirm)\b|\bplace (?:an )?order\b/i;
 
@@ -176,6 +181,8 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   const fileOps = new Map<string, number>();
   let execDigests: string[] = [];
   const taskDir = deps.taskId != null ? `.web-robot/tasks/${deps.taskId}` : null;
+  const tabBudget = deps.tabBudget ?? TAB_BUDGET;
+  const maxSpawns = deps.maxSpawns ?? MAX_SPAWNS;
   const filesTouched = new Map<string, string>();
   const ownedTabs = new Map<number, string>();
   let consecutiveBlocked = 0;
@@ -192,6 +199,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   const clickedRefs = new Set<string>();
   let pendingCalls: ToolCall[] = [];
   let researchBounce = false;
+  let spawnCount = 0;
   let index = 0;
 
   let pendingThinking: string | null = null;
@@ -246,7 +254,12 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     });
 
     const messages: ChatMessage[] = [
-      { role: 'system', content: systemPrompt(deps.workspace?.root, taskDir ?? undefined) },
+      {
+        role: 'system',
+        content: deps.research
+          ? subagentPrompt(task, maxSteps)
+          : systemPrompt(deps.workspace?.root, taskDir ?? undefined, { spawn: !!deps.spawn }),
+      },
       ...(deps.preamble ? [{ role: 'system' as const, content: deps.preamble }] : []),
       ...(deps.steps?.length
         ? [{
@@ -275,7 +288,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       let res: ChatResponse;
       const chatStarted = Date.now();
       try {
-        res = await deps.chat(messages, toolDefs({ workspace: !!deps.workspace }));
+        res = await deps.chat(messages, toolDefs({ workspace: !!deps.workspace, spawn: !!deps.spawn && !deps.research, research: deps.research }));
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         await deps.telemetry?.llm(index + 1, { messages, error: reason, durationMs: Date.now() - chatStarted });
@@ -335,7 +348,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     if (isRead) consecutiveReads++;
     else consecutiveReads = 0;
     if (agentCall.kind === 'done') {
-      if (wantsWebResearch && !researchBounce && domainsVisited.size === 0) {
+      if (wantsWebResearch && !researchBounce && domainsVisited.size === 0 && spawnCount === 0) {
         researchBounce = true;
         record(false, 'done', 'bounced: the task requires web research but no search/site navigation happened');
         notes.push('Your done call skips a required part of the task: it asks for web research (per-university admission details from the web) and you never left the original site. Do that now: open a search page (new_tab to bing.com or google.com), look up each distinct university admission details, and append them with source urls. Then call done.');
@@ -390,6 +403,31 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
         }
       }
       record(true, 'note', agentNoteDetail(agentCall.text));
+      index++;
+      continue;
+    }
+    if (agentCall.kind === 'spawn') {
+      if (!deps.spawn) {
+        record(false, call.name, 'sub-agents unavailable (no spawn wiring in this run)');
+        index++;
+        continue;
+      }
+      if (spawnCount >= maxSpawns) {
+        record(false, call.name, `blocked: spawn limit of ${maxSpawns} reached - finish from what you have`);
+        notes.push('Sub-agent limit reached. No more spawns: write the deliverable from the digests you already have and call done.');
+        index++;
+        continue;
+      }
+      spawnCount++;
+      const started = Date.now();
+      let report: string;
+      try {
+        report = await deps.spawn(agentCall.task, agentCall.budget);
+      } catch (error) {
+        report = `sub-agent ${spawnCount} crashed: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      extracts.push({ goal: `sub-agent ${spawnCount}: ${agentCall.task.replace(/\s+/g, ' ').slice(0, 60)}`, text: report });
+      record(true, `spawn_agent #${spawnCount}`, `${(report.split('\n')[0] ?? '').slice(0, 80)} (${((Date.now() - started) / 1000).toFixed(0)}s)`);
       index++;
       continue;
     }
@@ -535,11 +573,11 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       const tabId = Number((result.data as { tabId?: number } | undefined)?.tabId);
       if (Number.isFinite(tabId)) {
         ownedTabs.set(tabId, new URL(action.url ?? 'about:blank', 'https://x.invalid').hostname || 'blank');
-        if (ownedTabs.size > TAB_BUDGET) {
+        if (ownedTabs.size > tabBudget) {
           const oldest = ownedTabs.keys().next().value!;
           ownedTabs.delete(oldest);
           await deps.driver.act({ type: 'close_tab', tabId: oldest }).catch(() => undefined);
-          notes.push(`Closed your idle agent tab [${oldest}] to stay within the ${TAB_BUDGET}-tab budget.`);
+          notes.push(`Closed your idle agent tab [${oldest}] to stay within the ${tabBudget}-tab budget.`);
         }
       }
     }

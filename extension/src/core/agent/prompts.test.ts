@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { observationBlock, systemPrompt, taskContext } from './prompts';
+import { observationBlock, subagentPrompt, systemPrompt, taskContext } from './prompts';
 import type { Snapshot } from '../driver/types';
 
 const snapshot: Snapshot = {
@@ -31,6 +31,28 @@ describe('systemPrompt', () => {
     expect(prompt).toContain('scratch/');
     const rootPrompt = systemPrompt('/tmp/robots');
     expect(rootPrompt).not.toContain('YOUR TASK FOLDER');
+  });
+
+  it('adds the delegation rule only when spawns are available', () => {
+    expect(systemPrompt()).not.toContain('spawn_agent');
+    const spawnPrompt = systemPrompt('/tmp/robots', '.web-robot/tasks/9', { spawn: true });
+    expect(spawnPrompt).toContain('spawn_agent');
+    expect(spawnPrompt).toContain('ONE item');
+    expect(spawnPrompt).toContain('never for a single lookup');
+  });
+});
+
+describe('subagentPrompt', () => {
+  it('locks the child to one item with a sourcing contract', () => {
+    const prompt = subagentPrompt('find who created Rust', 16);
+    expect(prompt).toContain('"find who created Rust"');
+    expect(prompt).toContain('ONE item');
+    expect(prompt).toContain('Start with new_tab');
+    expect(prompt).toContain('never navigate an already-open tab');
+    expect(prompt).toContain('cannot ask the user');
+    expect(prompt).toContain('about 16 steps');
+    expect(prompt).toContain('never from your memory');
+    expect(prompt).toContain('source url');
   });
 });
 

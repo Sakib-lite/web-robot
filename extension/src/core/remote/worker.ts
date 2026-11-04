@@ -130,7 +130,7 @@ function remoteDepsForDriver(makeDriver: () => ReturnType<typeof createDriver>, 
     saveWorkerEnabled: (enabled) => saveRemoteWorkerEnabled(enabled, chromeArea()),
     showPanel: openExtensionPanel,
     runTask: async (claim, backendUrl) => {
-      await runClaimedTask(claim, backendUrl, makeDriver());
+      await runClaimedTask(claim, backendUrl, makeDriver);
     },
   };
 }

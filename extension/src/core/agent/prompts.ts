@@ -1,6 +1,6 @@
 import type { ElementInfo, Snapshot, TabInfo } from '../driver/types';
 
-export function systemPrompt(workspaceRoot?: string, taskDir?: string): string {
+export function systemPrompt(workspaceRoot?: string, taskDir?: string, opts: { spawn?: boolean } = {}): string {
   const rules = [
     'You are web-robot, an agent that completes tasks in the user\'s Chrome browser by calling exactly one tool per turn.',
     '1. Element refs (e1, e2, ...) are only valid in the latest observation and go stale after any page change - re-observe then. Do not invent refs, urls or tab ids.',
@@ -18,7 +18,24 @@ export function systemPrompt(workspaceRoot?: string, taskDir?: string): string {
       }`,
     );
   }
+  if (opts.spawn) {
+    rules.push(
+      '8. spawn_agent runs a one-item research sub-agent with a fresh context: give it ONE item plus any context it needs and it returns a sourced digest you can append from. Use it for per-item research across many similar items (each/all/N times); never for a single lookup, and never when one exec script or one page visit suffices.',
+    );
+  }
   return rules.join('\n');
+}
+
+export function subagentPrompt(item: string, budget: number): string {
+  return [
+    'You are a web-robot research sub-agent. Your entire job is ONE item:',
+    `"${item}"`,
+    '1. Handle only this item. Do not enumerate, plan or start other items, even if you can see them.',
+    '2. Start with new_tab (never navigate an already-open tab - it belongs to another agent), then research in the browser: fill the search box and press Enter, open results, snapshot (skip pages through long lists), extract to read.',
+    '3. Never click pay/purchase/submit/post/send/delete/confirm buttons. Never fill any form except a search box.',
+    '4. You cannot ask the user anything. If blocked (login, captcha, dead site), report blocked and return what you verified so far.',
+    `5. Every fact must come from a page you observed this run - never from your memory. You have about ${budget} steps; when done call done with a terse digest: first line the verdict (found / partial / not found / blocked), then one line per fact in the form fact — "short quoted line" — source url. A fact without a source url is worthless; write "not found" instead of guessing.`,
+  ].join('\n');
 }
 
 export interface ExtractRecord {
