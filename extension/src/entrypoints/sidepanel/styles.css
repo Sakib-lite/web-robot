@@ -823,3 +823,20 @@ select {
 .live-content {
   padding-left: 8px;
 }
+
+.polisher {
+  display: flex;
+  flex-direction: column;
+}
+
+.polisher .result pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.polisher .result ul {
+  margin: 0;
+  padding-left: 18px;
+}

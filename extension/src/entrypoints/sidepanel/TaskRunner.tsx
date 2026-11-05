@@ -12,6 +12,8 @@ import { Chevron, Collapse } from './common/ui';
 import { StepsEditor } from './StepsEditor';
 import { ChatSection, type RecentTask } from './ChatSection';
 import { startTelemetry } from '@/core/telemetry/client';
+import { polishPrompt } from '@/core/agent/polish';
+import PromptPolisher from './PromptPolisher';
 import ResultView from './ResultView';
 
 interface SkillOption {
@@ -333,6 +335,19 @@ export default function TaskRunner({
           <StepsEditor steps={taskSteps} running={running} onSet={setStepAt} onRemove={removeStep} onAdd={() => setTaskSteps((prev) => [...prev, ''])} />
         )}
       </Collapse>
+
+      <PromptPolisher
+        disabled={running}
+        polish={async (input) => {
+          const resolved = await resolveProvider();
+          if (!resolved) throw new Error('no active llm provider - add one in settings first');
+          return polishPrompt(input, resolved.provider);
+        }}
+        onUse={(p) => {
+          setTask(p);
+          setInputOpen(true);
+        }}
+      />
 
       <div className="config-bar">
         {recentTasks.length > 0 && (
