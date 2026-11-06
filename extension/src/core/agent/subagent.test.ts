@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { makeSpawner } from './subagent';
+import { makeSubAgent } from './subagent';
 import type { Driver } from '../driver/types';
 import type { ChatResponse, ToolCall } from '../llm/chatClient';
 import { toolDefs } from './tools';
@@ -22,12 +22,12 @@ function fakeDriver(): Driver {
   };
 }
 
-describe('makeSpawner', () => {
+describe('makeSubAgent', () => {
   it('runs the child to done and returns a labeled digest', async () => {
     const chat = vi.fn().mockResolvedValueOnce(
       reply('', [toolCall('done', { summary: 'found\nRust — Graydon Hoare — rust-lang.org' })]),
     );
-    const spawn = makeSpawner({ makeDriver: fakeDriver, chat });
+    const spawn = makeSubAgent({ makeDriver: fakeDriver, chat });
     const digest = await spawn('who created Rust');
     expect(digest).toContain('sub-agent 1');
     expect(digest).toContain('who created Rust');
@@ -43,7 +43,7 @@ describe('makeSpawner', () => {
     const chat = vi.fn().mockResolvedValue(reply('', [toolCall('done', { summary: 'x' })]));
     const drivers = [fakeDriver(), fakeDriver(), fakeDriver()];
     let made = 0;
-    const spawn = makeSpawner({ makeDriver: () => drivers[made++]!, chat });
+    const spawn = makeSubAgent({ makeDriver: () => drivers[made++]!, chat });
     await spawn('item a');
     await spawn('item b');
     expect(made).toBe(2);
@@ -52,14 +52,14 @@ describe('makeSpawner', () => {
     const names = tools.map((t) => t.name);
     expect(names).not.toContain('ask_user');
     expect(names).not.toContain('exec');
-    expect(names).not.toContain('spawn_agent');
+    expect(names).not.toContain('sub_agent');
     expect(names).toContain('new_tab');
     expect(names).toContain('extract');
   });
 
   it('labels failed and stopped children as scoped losses', async () => {
     const chat = vi.fn().mockResolvedValueOnce(reply('', [toolCall('fail', { reason: 'login wall' })]));
-    const spawn = makeSpawner({ makeDriver: fakeDriver, chat });
+    const spawn = makeSubAgent({ makeDriver: fakeDriver, chat });
     const digest = await spawn('blocked item');
     expect(digest).toContain('sub-agent 1');
     expect(digest).toContain('failed');
@@ -69,7 +69,7 @@ describe('makeSpawner', () => {
   it('numbers sub-agents sequentially and truncates long digests', async () => {
     const long = 'x'.repeat(3000);
     const chat = vi.fn().mockResolvedValue(reply('', [toolCall('done', { summary: long })]));
-    const spawn = makeSpawner({ makeDriver: fakeDriver, chat });
+    const spawn = makeSubAgent({ makeDriver: fakeDriver, chat });
     const first = await spawn('item one');
     const second = await spawn('item two');
     expect(first).toContain('sub-agent 1');
@@ -83,7 +83,7 @@ describe('makeSpawner', () => {
       .mockResolvedValueOnce(reply('', [toolCall('goto', { url: 'https://rust-lang.org' })]))
       .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'ok' })]));
     const onStep = vi.fn();
-    const spawn = makeSpawner({ makeDriver: fakeDriver, chat, onStep });
+    const spawn = makeSubAgent({ makeDriver: fakeDriver, chat, onStep });
     await spawn('item');
     expect(onStep).toHaveBeenCalled();
     expect(onStep.mock.calls[0]![0].call).toBe('[s1] goto https://rust-lang.org');

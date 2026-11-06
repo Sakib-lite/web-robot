@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { runTask, type StepRecord, type TaskResult } from '@/core/agent/loop';
 import { planTask } from '@/core/agent/planner';
-import { makeSpawner } from '@/core/agent/subagent';
+import { makeSubAgent } from '@/core/agent/subagent';
 import { createExtensionDriver } from '@/core/driver/extensionDriver';
 import { createHttpPlane } from '@/core/local/httpPlane';
 import { chatCompletion, type ChatMessage, type ChatResponse, type ToolDef } from '@/core/llm/chatClient';
@@ -188,7 +188,7 @@ export default function TaskRunner({
         askUser,
         signal: controller.signal,
         telemetry,
-        spawn: makeSpawner({ makeDriver: createExtensionDriver, chat: skillChat, telemetry, signal: controller.signal, onStep: pushStep }),
+        subAgent: makeSubAgent({ makeDriver: createExtensionDriver, chat: skillChat, telemetry, signal: controller.signal, onStep: pushStep }),
         ...(workspace ? { workspace } : {}),
         ...(telemetry.taskId ? { taskId: telemetry.taskId } : {}),
         ...(effectiveSteps.length ? { steps: effectiveSteps } : {}),

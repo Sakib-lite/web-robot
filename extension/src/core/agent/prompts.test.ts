@@ -33,12 +33,12 @@ describe('systemPrompt', () => {
     expect(rootPrompt).not.toContain('YOUR TASK FOLDER');
   });
 
-  it('adds the delegation rule only when spawns are available', () => {
-    expect(systemPrompt()).not.toContain('spawn_agent');
-    const spawnPrompt = systemPrompt('/tmp/robots', '.web-robot/tasks/9', { spawn: true });
-    expect(spawnPrompt).toContain('spawn_agent');
-    expect(spawnPrompt).toContain('ONE item');
-    expect(spawnPrompt).toContain('never for a single lookup');
+  it('adds the delegation rule only when sub-agents are available', () => {
+    expect(systemPrompt()).not.toContain('sub_agent');
+    const subAgentPrompt = systemPrompt('/tmp/robots', '.web-robot/tasks/9', { subAgent: true });
+    expect(subAgentPrompt).toContain('sub_agent');
+    expect(subAgentPrompt).toContain('ONE item');
+    expect(subAgentPrompt).toContain('never for a single lookup');
   });
 });
 

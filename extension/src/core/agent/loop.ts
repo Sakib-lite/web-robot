@@ -33,10 +33,10 @@ export interface LoopDeps {
   driver: Driver;
   chat: (messages: ChatMessage[], tools: ToolDef[]) => Promise<ChatResponse>;
   askUser: (question: string, recommended?: string) => Promise<string | null>;
-  spawn?: (task: string, budget?: number) => Promise<string>;
+  subAgent?: (task: string, budget?: number) => Promise<string>;
   research?: boolean;
   tabBudget?: number;
-  maxSpawns?: number;
+  maxSubAgents?: number;
   maxSteps?: number;
   signal?: AbortSignal;
   onStep?: (step: StepRecord) => void;
@@ -52,7 +52,7 @@ const DEFAULT_MAX_STEPS = 400;
 const LOOP_NUDGE_AT = 3;
 const LOOP_BLOCK_AT = 5;
 const STALL_LIMIT = 6;
-const MAX_SPAWNS = 60;
+const MAX_SUB_AGENTS = 60;
 
 const DANGER_PATTERN = /\b(pay|purchase|buy|checkout|delete|remove|submit|post|send|confirm)\b|\bplace (?:an )?order\b/i;
 
@@ -182,7 +182,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   let execDigests: string[] = [];
   const taskDir = deps.taskId != null ? `.web-robot/tasks/${deps.taskId}` : null;
   const tabBudget = deps.tabBudget ?? TAB_BUDGET;
-  const maxSpawns = deps.maxSpawns ?? MAX_SPAWNS;
+  const maxSubAgents = deps.maxSubAgents ?? MAX_SUB_AGENTS;
   const filesTouched = new Map<string, string>();
   const ownedTabs = new Map<number, string>();
   let consecutiveBlocked = 0;
@@ -199,7 +199,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   const clickedRefs = new Set<string>();
   let pendingCalls: ToolCall[] = [];
   let researchBounce = false;
-  let spawnCount = 0;
+  let subAgentCount = 0;
   let index = 0;
 
   let pendingThinking: string | null = null;
@@ -258,7 +258,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
         role: 'system',
         content: deps.research
           ? subagentPrompt(task, maxSteps)
-          : systemPrompt(deps.workspace?.root, taskDir ?? undefined, { spawn: !!deps.spawn }),
+          : systemPrompt(deps.workspace?.root, taskDir ?? undefined, { subAgent: !!deps.subAgent }),
       },
       ...(deps.preamble ? [{ role: 'system' as const, content: deps.preamble }] : []),
       ...(deps.steps?.length
@@ -288,7 +288,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       let res: ChatResponse;
       const chatStarted = Date.now();
       try {
-        res = await deps.chat(messages, toolDefs({ workspace: !!deps.workspace, spawn: !!deps.spawn && !deps.research, research: deps.research }));
+        res = await deps.chat(messages, toolDefs({ workspace: !!deps.workspace, subAgent: !!deps.subAgent && !deps.research, research: deps.research }));
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         await deps.telemetry?.llm(index + 1, { messages, error: reason, durationMs: Date.now() - chatStarted });
@@ -348,7 +348,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     if (isRead) consecutiveReads++;
     else consecutiveReads = 0;
     if (agentCall.kind === 'done') {
-      if (wantsWebResearch && !researchBounce && domainsVisited.size === 0 && spawnCount === 0) {
+      if (wantsWebResearch && !researchBounce && domainsVisited.size === 0 && subAgentCount === 0) {
         researchBounce = true;
         record(false, 'done', 'bounced: the task requires web research but no search/site navigation happened');
         notes.push('Your done call skips a required part of the task: it asks for web research (per-university admission details from the web) and you never left the original site. Do that now: open a search page (new_tab to bing.com or google.com), look up each distinct university admission details, and append them with source urls. Then call done.');
@@ -406,28 +406,28 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       index++;
       continue;
     }
-    if (agentCall.kind === 'spawn') {
-      if (!deps.spawn) {
-        record(false, call.name, 'sub-agents unavailable (no spawn wiring in this run)');
+    if (agentCall.kind === 'sub_agent') {
+      if (!deps.subAgent) {
+        record(false, call.name, 'sub-agents unavailable (no sub-agent wiring in this run)');
         index++;
         continue;
       }
-      if (spawnCount >= maxSpawns) {
-        record(false, call.name, `blocked: spawn limit of ${maxSpawns} reached - finish from what you have`);
-        notes.push('Sub-agent limit reached. No more spawns: write the deliverable from the digests you already have and call done.');
+      if (subAgentCount >= maxSubAgents) {
+        record(false, call.name, `blocked: sub-agent limit of ${maxSubAgents} reached - finish from what you have`);
+        notes.push('Sub-agent limit reached. No more sub-agents: write the deliverable from the digests you already have and call done.');
         index++;
         continue;
       }
-      spawnCount++;
+      subAgentCount++;
       const started = Date.now();
       let report: string;
       try {
-        report = await deps.spawn(agentCall.task, agentCall.budget);
+        report = await deps.subAgent(agentCall.task, agentCall.budget);
       } catch (error) {
-        report = `sub-agent ${spawnCount} crashed: ${error instanceof Error ? error.message : String(error)}`;
+        report = `sub-agent ${subAgentCount} crashed: ${error instanceof Error ? error.message : String(error)}`;
       }
-      extracts.push({ goal: `sub-agent ${spawnCount}: ${agentCall.task.replace(/\s+/g, ' ').slice(0, 60)}`, text: report });
-      record(true, `spawn_agent #${spawnCount}`, `${(report.split('\n')[0] ?? '').slice(0, 80)} (${((Date.now() - started) / 1000).toFixed(0)}s)`);
+      extracts.push({ goal: `sub-agent ${subAgentCount}: ${agentCall.task.replace(/\s+/g, ' ').slice(0, 60)}`, text: report });
+      record(true, `sub_agent #${subAgentCount}`, `${(report.split('\n')[0] ?? '').slice(0, 80)} (${((Date.now() - started) / 1000).toFixed(0)}s)`);
       index++;
       continue;
     }

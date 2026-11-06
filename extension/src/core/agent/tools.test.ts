@@ -15,10 +15,10 @@ describe('toolDefs', () => {
     }
   });
 
-  it('offers spawn_agent only when spawns are wired', () => {
-    expect(toolDefs().map((d) => d.name)).not.toContain('spawn_agent');
-    expect(toolDefs({ spawn: true }).map((d) => d.name)).toContain('spawn_agent');
-    expect(toolDefs({ spawn: true, research: true }).map((d) => d.name)).not.toContain('spawn_agent');
+  it('offers sub_agent only when sub-agents are wired', () => {
+    expect(toolDefs().map((d) => d.name)).not.toContain('sub_agent');
+    expect(toolDefs({ subAgent: true }).map((d) => d.name)).toContain('sub_agent');
+    expect(toolDefs({ subAgent: true, research: true }).map((d) => d.name)).not.toContain('sub_agent');
   });
 
   it('narrows research runs to read-only browsing tools', () => {
@@ -87,17 +87,17 @@ describe('parseCall', () => {
     });
   });
 
-  it('parses spawn_agent calls and rejects out-of-range budgets', () => {
-    expect(parseCall('spawn_agent', { task: 'research UIC admissions' })).toEqual({
+  it('parses sub_agent calls and rejects out-of-range budgets', () => {
+    expect(parseCall('sub_agent', { task: 'research UIC admissions' })).toEqual({
       ok: true,
-      call: { kind: 'spawn', task: 'research UIC admissions' },
+      call: { kind: 'sub_agent', task: 'research UIC admissions' },
     });
-    expect(parseCall('spawn_agent', { task: 'x', budget: 12 })).toEqual({
+    expect(parseCall('sub_agent', { task: 'x', budget: 12 })).toEqual({
       ok: true,
-      call: { kind: 'spawn', task: 'x', budget: 12 },
+      call: { kind: 'sub_agent', task: 'x', budget: 12 },
     });
-    expect(parseCall('spawn_agent', { task: 'x', budget: 3 }).ok).toBe(false);
-    expect(parseCall('spawn_agent', {}).ok).toBe(false);
+    expect(parseCall('sub_agent', { task: 'x', budget: 3 }).ok).toBe(false);
+    expect(parseCall('sub_agent', {}).ok).toBe(false);
   });
 
   it('rejects unknown tools and invalid arguments', () => {

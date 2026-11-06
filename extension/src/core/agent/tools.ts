@@ -7,7 +7,7 @@ export type AgentCall =
   | { kind: 'observe'; skip?: number }
   | { kind: 'note'; text: string }
   | { kind: 'local'; call: LocalCall }
-  | { kind: 'spawn'; task: string; budget?: number }
+  | { kind: 'sub_agent'; task: string; budget?: number }
   | { kind: 'ask_user'; question: string; recommended?: string }
   | { kind: 'done'; summary: string; data?: unknown }
   | { kind: 'fail'; reason: string };
@@ -73,16 +73,16 @@ export const toolSpecs = {
   delete_path: { description: 'Delete a file or directory tree in the workspace.', schema: z.object({ path: z.string() }) },
   mkdir: { description: 'Create a workspace directory, with parents.', schema: z.object({ path: z.string() }) },
   exec: { description: 'Run a shell command inside the workspace (cwd = workspace root; a few catastrophic commands are blocked). Output comes back capped head+tail - pipe through head/tail/grep yourself for big listings.', schema: z.object({ cmd: z.string(), timeout_ms: z.number().int().optional() }) },
-  spawn_agent: { description: 'Run a one-item research sub-agent with a fresh context: give it exactly ONE item (one university, one query) plus any context it needs; it opens its own tab, browses read-only and returns a digest with source urls. Use it for per-item research when the task has many similar items; a single lookup or one exec script is faster done yourself.', schema: z.object({ task: z.string().min(1), budget: z.number().int().min(6).max(30).optional() }) },
+  sub_agent: { description: 'Run a one-item research sub-agent with a fresh context: give it exactly ONE item (one university, one query) plus any context it needs; it opens its own tab, browses read-only and returns a digest with source urls. Use it for per-item research when the task has many similar items; a single lookup or one exec script is faster done yourself.', schema: z.object({ task: z.string().min(1), budget: z.number().int().min(6).max(30).optional() }) },
 } satisfies Record<string, ToolSpec>;
 
 const LOCAL_TOOLS = new Set(['list_dir', 'read_file', 'write_file', 'edit_file', 'append_file', 'delete_path', 'mkdir', 'exec']);
 
 const RESEARCH_TOOLS = new Set(['goto', 'new_tab', 'switch_tab', 'close_tab', 'click', 'fill', 'select', 'press', 'scroll', 'extract', 'wait', 'snapshot', 'note', 'done', 'fail']);
 
-export function toolDefs(opts: { workspace?: boolean; spawn?: boolean; research?: boolean } = {}): ToolDef[] {
+export function toolDefs(opts: { workspace?: boolean; subAgent?: boolean; research?: boolean } = {}): ToolDef[] {
   return Object.entries(toolSpecs)
-    .filter(([name]) => (opts.workspace || !LOCAL_TOOLS.has(name)) && (!opts.research || RESEARCH_TOOLS.has(name)) && (opts.spawn || name !== 'spawn_agent'))
+    .filter(([name]) => (opts.workspace || !LOCAL_TOOLS.has(name)) && (!opts.research || RESEARCH_TOOLS.has(name)) && (opts.subAgent || name !== 'sub_agent'))
     .map(([name, spec]) => ({
       name,
       description: spec.description,
@@ -197,10 +197,10 @@ export function parseCall(name: string, args: Record<string, unknown>): { ok: tr
         ok: true,
         call: { kind: 'local', call: { op: 'exec', cmd: String(a.cmd), ...(a.timeout_ms !== undefined ? { timeoutMs: Number(a.timeout_ms) } : {}) } },
       };
-    case 'spawn_agent':
+    case 'sub_agent':
       return {
         ok: true,
-        call: { kind: 'spawn', task: String(a.task), ...(a.budget !== undefined ? { budget: Number(a.budget) } : {}) },
+        call: { kind: 'sub_agent', task: String(a.task), ...(a.budget !== undefined ? { budget: Number(a.budget) } : {}) },
       };
     case 'note':
       return { ok: true, call: { kind: 'note', text: String(a.text) } };

@@ -7,7 +7,7 @@ const MIN_BUDGET = 6;
 const MAX_BUDGET = 30;
 const MAX_DIGEST = 1500;
 
-export interface SpawnDeps {
+export interface SubAgentDeps {
   makeDriver: () => Driver;
   chat: (messages: ChatMessage[], tools: ToolDef[]) => Promise<ChatResponse>;
   telemetry?: LoopDeps['telemetry'];
@@ -15,7 +15,7 @@ export interface SpawnDeps {
   signal?: AbortSignal;
 }
 
-export function makeSpawner(deps: SpawnDeps): (task: string, budget?: number) => Promise<string> {
+export function makeSubAgent(deps: SubAgentDeps): (task: string, budget?: number) => Promise<string> {
   let n = 0;
   return async (task, budget) => {
     n += 1;

@@ -5,7 +5,7 @@ import type { LlmProvider } from '../llm/providers';
 describe('polishSystemPrompt', () => {
   it('encodes the system shape rules and the answer format', () => {
     const prompt = polishSystemPrompt();
-    expect(prompt).toContain('spawn_agent');
+    expect(prompt).toContain('sub_agent');
     expect(prompt).toContain('one-item read-only research sub-agent');
     expect(prompt).toContain('python script with exec');
     expect(prompt).toContain('append each verified batch');
@@ -21,10 +21,10 @@ describe('polishSystemPrompt', () => {
 describe('parsePolish', () => {
   it('splits analysis bullets from the prompt body', () => {
     const parsed = parsePolish(
-      'ANALYSIS:\n- per-item research across 3 languages\n- fan-out via sub-agents, parent writes the file\n\nPROMPT:\nUse spawn_agent once per language...',
+      'ANALYSIS:\n- per-item research across 3 languages\n- fan-out via sub-agents, parent writes the file\n\nPROMPT:\nUse sub_agent once per language...',
     );
     expect(parsed.analysis).toEqual(['per-item research across 3 languages', 'fan-out via sub-agents, parent writes the file']);
-    expect(parsed.prompt).toBe('Use spawn_agent once per language...');
+    expect(parsed.prompt).toBe('Use sub_agent once per language...');
   });
 
   it('strips code fences around the prompt', () => {
@@ -33,9 +33,9 @@ describe('parsePolish', () => {
   });
 
   it('falls back to the whole reply when the model ignores the format', () => {
-    const parsed = parsePolish('Just use spawn_agent per university and save admissions.md.');
+    const parsed = parsePolish('Just use sub_agent per university and save admissions.md.');
     expect(parsed.analysis).toEqual([]);
-    expect(parsed.prompt).toContain('spawn_agent');
+    expect(parsed.prompt).toContain('sub_agent');
   });
 });
 
@@ -48,7 +48,7 @@ describe('polishPrompt', () => {
   };
 
   it('sends the polishing contract and parses the reply', async () => {
-    const content = 'ANALYSIS:\n- many items -> sub-agent fan-out\n\nPROMPT:\nUse spawn_agent once per item and append to out.md';
+    const content = 'ANALYSIS:\n- many items -> sub-agent fan-out\n\nPROMPT:\nUse sub_agent once per item and append to out.md';
     let sentBody = '';
     const fetchFn = (async (_url: unknown, init?: RequestInit) => {
       sentBody = String(init?.body ?? '');
@@ -56,7 +56,7 @@ describe('polishPrompt', () => {
     }) as unknown as typeof fetch;
     const parsed = await polishPrompt('check all unis', provider, fetchFn);
     expect(parsed.analysis).toEqual(['many items -> sub-agent fan-out']);
-    expect(parsed.prompt).toContain('Use spawn_agent');
+    expect(parsed.prompt).toContain('Use sub_agent');
     expect(sentBody).toContain('ANALYSIS:');
     expect(sentBody).toContain('check all unis');
   });

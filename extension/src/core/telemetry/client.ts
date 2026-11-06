@@ -1,5 +1,5 @@
 import { runTask } from '../agent/loop';
-import { makeSpawner } from '../agent/subagent';
+import { makeSubAgent } from '../agent/subagent';
 import { chatCompletion } from '../llm/chatClient';
 import type { ChatMessage, ToolDef } from '../llm/chatClient';
 
@@ -108,7 +108,7 @@ export async function runRemoteTask(
       driver: deps.makeDriver(),
       chat,
       askUser: makeRemoteAsk(taskId, backendUrl),
-      spawn: makeSpawner({ makeDriver: deps.makeDriver, chat, telemetry, ...(deps.signal ? { signal: deps.signal } : {}) }),
+      subAgent: makeSubAgent({ makeDriver: deps.makeDriver, chat, telemetry, ...(deps.signal ? { signal: deps.signal } : {}) }),
       ...(deps.maxSteps ? { maxSteps: deps.maxSteps } : {}),
       ...(deps.signal ? { signal: deps.signal } : {}),
       ...(deps.workspace ? { workspace: deps.workspace } : {}),

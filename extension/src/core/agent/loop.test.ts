@@ -140,16 +140,16 @@ describe('runTask', () => {
   });
 
   it('delegates to a sub-agent and feeds the digest back as context', async () => {
-    const spawn = vi.fn().mockResolvedValue('sub-agent 1 ("find rust creator") done:\nRust — Graydon Hoare — rust-lang.org');
+    const subAgent = vi.fn().mockResolvedValue('sub-agent 1 ("find rust creator") done:\nRust — Graydon Hoare — rust-lang.org');
     const chat = vi
       .fn()
-      .mockResolvedValueOnce(reply('', [toolCall('spawn_agent', { task: 'find rust creator', budget: 10 })]))
+      .mockResolvedValueOnce(reply('', [toolCall('sub_agent', { task: 'find rust creator', budget: 10 })]))
       .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'collected' })]));
-    const result = await runTask('research languages', deps({ chat, spawn }));
+    const result = await runTask('research languages', deps({ chat, subAgent }));
 
-    expect(spawn).toHaveBeenCalledExactlyOnceWith('find rust creator', 10);
+    expect(subAgent).toHaveBeenCalledExactlyOnceWith('find rust creator', 10);
     expect(result.status).toBe('done');
-    expect(result.steps[0]!.call).toBe('spawn_agent #1');
+    expect(result.steps[0]!.call).toBe('sub_agent #1');
     expect(result.steps[0]!.ok).toBe(true);
 
     const context = (chat.mock.calls[1]![0] as ChatMessage[]).map((m) => m.content ?? '').join('\n');
@@ -158,16 +158,16 @@ describe('runTask', () => {
   });
 
   it('records a scoped loss when the sub-agent crashes or is unwired', async () => {
-    const spawn = vi.fn().mockRejectedValue(new Error('driver exploded'));
+    const subAgent = vi.fn().mockRejectedValue(new Error('driver exploded'));
     const chat = vi
       .fn()
-      .mockResolvedValueOnce(reply('', [toolCall('spawn_agent', { task: 'item a' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('sub_agent', { task: 'item a' })]))
       .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'moved on' })]));
-    const crashed = await runTask('t', deps({ chat, spawn }));
+    const crashed = await runTask('t', deps({ chat, subAgent }));
     expect(crashed.steps[0]!.ok).toBe(true);
     expect((chat.mock.calls[1]![0] as ChatMessage[]).map((m) => m.content ?? '').join('\n')).toContain('crashed');
 
-    const unwired = vi.fn().mockResolvedValueOnce(reply('', [toolCall('spawn_agent', { task: 'item b' })]))
+    const unwired = vi.fn().mockResolvedValueOnce(reply('', [toolCall('sub_agent', { task: 'item b' })]))
       .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'fine' })]));
     const bare = await runTask('t', deps({ chat: unwired as never }));
     expect(bare.status).toBe('done');
@@ -176,18 +176,18 @@ describe('runTask', () => {
   });
 
   it('blocks spawns past the cap and pushes the model to finish', async () => {
-    const spawn = vi.fn().mockResolvedValue('sub-agent done: ok');
+    const subAgent = vi.fn().mockResolvedValue('sub-agent done: ok');
     const chat = vi
       .fn()
-      .mockResolvedValueOnce(reply('', [toolCall('spawn_agent', { task: 'item a' })]))
-      .mockResolvedValueOnce(reply('', [toolCall('spawn_agent', { task: 'item b' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('sub_agent', { task: 'item a' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('sub_agent', { task: 'item b' })]))
       .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'wrapped up' })]));
-    const result = await runTask('many items', deps({ chat, spawn, maxSpawns: 1 }));
+    const result = await runTask('many items', deps({ chat, subAgent, maxSubAgents: 1 }));
 
-    expect(spawn).toHaveBeenCalledOnce();
+    expect(subAgent).toHaveBeenCalledOnce();
     expect(result.status).toBe('done');
     expect(result.steps[1]!.ok).toBe(false);
-    expect(result.steps[1]!.detail).toContain('spawn limit of 1');
+    expect(result.steps[1]!.detail).toContain('sub-agent limit of 1');
   });
 
   it('requires confirmation for dangerous clicks and skips them when declined', async () => {

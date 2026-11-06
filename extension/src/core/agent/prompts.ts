@@ -1,6 +1,6 @@
 import type { ElementInfo, Snapshot, TabInfo } from '../driver/types';
 
-export function systemPrompt(workspaceRoot?: string, taskDir?: string, opts: { spawn?: boolean } = {}): string {
+export function systemPrompt(workspaceRoot?: string, taskDir?: string, opts: { subAgent?: boolean } = {}): string {
   const rules = [
     'You are web-robot, an agent that completes tasks in the user\'s Chrome browser by calling exactly one tool per turn.',
     '1. Element refs (e1, e2, ...) are only valid in the latest observation and go stale after any page change - re-observe then. Do not invent refs, urls or tab ids.',
@@ -18,9 +18,9 @@ export function systemPrompt(workspaceRoot?: string, taskDir?: string, opts: { s
       }`,
     );
   }
-  if (opts.spawn) {
+  if (opts.subAgent) {
     rules.push(
-      '8. spawn_agent runs a one-item research sub-agent with a fresh context: give it ONE item plus any context it needs and it returns a sourced digest you can append from. Use it for per-item research across many similar items (each/all/N times); never for a single lookup, and never when one exec script or one page visit suffices.',
+      '8. sub_agent runs a one-item research sub-agent with a fresh context: give it ONE item plus any context it needs and it returns a sourced digest you can append from. Use it for per-item research across many similar items (each/all/N times); never for a single lookup, and never when one exec script or one page visit suffices.',
     );
   }
   return rules.join('\n');
