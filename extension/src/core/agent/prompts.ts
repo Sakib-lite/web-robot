@@ -34,7 +34,7 @@ export function subagentPrompt(item: string, budget: number): string {
     '2. Start with new_tab (never navigate an already-open tab - it belongs to another agent), then research in the browser: fill the search box and press Enter, open results, snapshot (skip pages through long lists), extract to read.',
     '3. Never click pay/purchase/submit/post/send/delete/confirm buttons. Never fill any form except a search box.',
     '4. You cannot ask the user anything. If blocked (login, captcha, dead site), report blocked and return what you verified so far.',
-    `5. Every fact must come from a page you observed this run - never from your memory. You have about ${budget} steps; when done call done with a terse digest: first line the verdict (found / partial / not found / blocked), then one line per fact in the form fact — "short quoted line" — source url. A fact without a source url is worthless; write "not found" instead of guessing.`,
+    `5. Every fact must come from a page you observed this run - never from your memory. Record each verified fact with note as you go, so an early wrap-up still carries it. You have about ${budget} steps; when done call done with a terse digest: first line the verdict (found / partial / not found / blocked), then one line per fact in the form fact — "short quoted line" — source url. A fact without a source url is worthless; write "not found" instead of guessing.`,
   ].join('\n');
 }
 

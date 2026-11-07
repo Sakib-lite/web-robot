@@ -7,6 +7,7 @@ describe('polishSystemPrompt', () => {
     const prompt = polishSystemPrompt();
     expect(prompt).toContain('sub_agent');
     expect(prompt).toContain('one-item read-only research sub-agent');
+    expect(prompt).toContain('budget 24-30');
     expect(prompt).toContain('python script with exec');
     expect(prompt).toContain('append each verified batch');
     expect(prompt).toContain('never from model memory');

@@ -227,6 +227,33 @@ describe('runTask', () => {
     expect(result.steps).toHaveLength(5);
   });
 
+  it('forces a digest from a research child that exhausts its budget', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('goto', { url: 'https://group.example' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('extract', { goal: 'papers' })]))
+      .mockResolvedValueOnce(reply('partial\nfocus on ML - "we study time series" - https://group.example'));
+    const result = await runTask('research the group', deps({ chat, research: true, maxSteps: 2 }));
+
+    expect(result.status).toBe('done');
+    expect(result.summary).toContain('time series');
+    expect(result.summary).toContain('budget exhausted at 2 steps');
+    expect(chat).toHaveBeenCalledTimes(3);
+    const forced = chat.mock.calls[2] as unknown as [ChatMessage[], Array<{ name: string }>];
+    expect(forced[1]).toHaveLength(0);
+    expect(forced[0].map((m) => m.content ?? '').join('\n')).toContain('STEP BUDGET EXHAUSTED');
+  });
+
+  it('still fails the child when the forced digest comes back empty', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('goto', { url: 'https://group.example' })]))
+      .mockResolvedValueOnce(reply(''));
+    const result = await runTask('research the group', deps({ chat, research: true, maxSteps: 1 }));
+    expect(result.status).toBe('failed');
+    expect(result.reason).toContain('step limit of 1');
+  });
+
   it('blocks repeated no-op actions but keeps the task alive', async () => {
     const act = vi.fn(async () => ({ ok: true, detail: 'clicked' }));
     const driver = fakeDriver({ act });

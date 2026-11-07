@@ -203,6 +203,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   let index = 0;
 
   let pendingThinking: string | null = null;
+  let wrapUpAttempted = false;
 
   function record(ok: boolean, call: string, detail: string) {
     const step: StepRecord = { index: index + 1, call, detail, ok, ...(pendingThinking ? { thinking: pendingThinking } : {}) };
@@ -210,6 +211,32 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     steps.push(step);
     stepLines.push(ok ? `${step.call} → ${detail}` : `${step.call} → failed: ${detail}`);
     deps.onStep?.(step);
+  }
+
+  async function forceDigest(): Promise<string | null> {
+    const forcedMessages: ChatMessage[] = [
+      { role: 'system', content: subagentPrompt(task, maxSteps) },
+      { role: 'user', content: taskContext(task, stepLines, userAnswers, extracts, agentNotes, null, execDigests) },
+      { role: 'user', content: 'STEP BUDGET EXHAUSTED. Reply NOW without calling any tool: your final digest - verdict line (found / partial / not found / blocked), then each verified fact as fact — "quoted line" — source url, only from what you observed above. Never invent facts.' },
+    ];
+    const started = Date.now();
+    try {
+      const res = await deps.chat(forcedMessages, []);
+      await deps.telemetry?.llm(index + 1, {
+        messages: forcedMessages,
+        ...(res.thinking ? { thinking: res.thinking } : {}),
+        responseContent: res.content,
+        toolCalls: res.toolCalls,
+        usage: res.usage ?? null,
+        durationMs: Date.now() - started,
+      });
+      const text = res.content.trim();
+      if (!text) return null;
+      record(true, 'forced digest', text.replace(/\s+/g, ' ').slice(0, 90));
+      return `${text}\n\n(budget exhausted at ${maxSteps} steps - forced digest from partial research)`;
+    } catch {
+      return null;
+    }
   }
 
   async function cleanupOwnedTabs() {
@@ -227,6 +254,11 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   while (true) {
     if (deps.signal?.aborted) return { status: 'stopped', reason: 'cancelled by user', steps };
     if (index >= maxSteps) {
+      if (deps.research && !wrapUpAttempted) {
+        wrapUpAttempted = true;
+        const forced = await forceDigest();
+        if (forced) return { status: 'done', summary: forced, steps };
+      }
       return { status: 'failed', reason: `step limit of ${maxSteps} reached`, steps };
     }
 
