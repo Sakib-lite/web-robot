@@ -88,4 +88,36 @@ describe('makeSubAgent', () => {
     expect(onStep).toHaveBeenCalled();
     expect(onStep.mock.calls[0]![0].call).toBe('[s1] goto https://rust-lang.org');
   });
+
+  it('persists every digest to subagents.md when a workspace is provided', async () => {
+    const chat = vi.fn().mockResolvedValue(reply('', [toolCall('done', { summary: 'found: X — url' })]));
+    const appended: string[] = [];
+    const plane = {
+      append: async (path: string, text: string) => {
+        appended.push(`${path}\n${text}`);
+        return { bytes: text.length, totalBytes: text.length };
+      },
+    };
+    const spawn = makeSubAgent({ makeDriver: fakeDriver, chat, workspace: { plane: plane as never, taskId: 42 } });
+    await spawn('item one');
+    await spawn('item two');
+    expect(appended).toHaveLength(2);
+    expect(appended[0]).toContain('.web-robot/tasks/42/subagents.md');
+    expect(appended[0]).toContain('## sub-agent 1 — item one');
+    expect(appended[1]).toContain('## sub-agent 2 — item two');
+    expect(appended[0]).toContain('found: X');
+  });
+
+  it('keeps working when the digest write fails', async () => {
+    const chat = vi.fn().mockResolvedValue(reply('', [toolCall('done', { summary: 'ok' })]));
+    const plane = {
+      append: async () => {
+        throw new Error('plane down');
+      },
+    };
+    const spawn = makeSubAgent({ makeDriver: fakeDriver, chat, workspace: { plane: plane as never, taskId: 7 } });
+    const digest = await spawn('item');
+    expect(digest).toContain('sub-agent 1');
+    expect(digest).toContain('done');
+  });
 });

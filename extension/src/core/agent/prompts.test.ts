@@ -38,6 +38,8 @@ describe('systemPrompt', () => {
     const subAgentPrompt = systemPrompt('/tmp/robots', '.web-robot/tasks/9', { subAgent: true });
     expect(subAgentPrompt).toContain('sub_agent');
     expect(subAgentPrompt).toContain('ONE item');
+    expect(subAgentPrompt).toContain('ONE at a time');
+    expect(subAgentPrompt).toContain('subagents.md');
     expect(subAgentPrompt).toContain('never for a single lookup');
   });
 });

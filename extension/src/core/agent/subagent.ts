@@ -1,5 +1,6 @@
 import type { ChatMessage, ChatResponse, ToolDef } from '../llm/chatClient';
 import type { Driver } from '../driver/types';
+import type { LocalPlane } from '../local/plane';
 import { runTask, type LoopDeps, type StepRecord, type TaskResult } from './loop';
 
 const DEFAULT_BUDGET = 16;
@@ -13,6 +14,7 @@ export interface SubAgentDeps {
   telemetry?: LoopDeps['telemetry'];
   onStep?: (step: StepRecord) => void;
   signal?: AbortSignal;
+  workspace?: { plane: LocalPlane; taskId: number };
 }
 
 export function makeSubAgent(deps: SubAgentDeps): (task: string, budget?: number) => Promise<string> {
@@ -32,7 +34,18 @@ export function makeSubAgent(deps: SubAgentDeps): (task: string, budget?: number
       research: true,
       tabBudget: 2,
     });
-    return digest(id, task, result);
+    const text = digest(id, task, result);
+    if (deps.workspace) {
+      const head = task.replace(/\s+/g, ' ').slice(0, 70);
+      try {
+        await deps.workspace.plane.append(
+          `.web-robot/tasks/${deps.workspace.taskId}/subagents.md`,
+          `## sub-agent ${id} — ${head}\n${text}\n\n`,
+        );
+      } catch {
+      }
+    }
+    return text;
   };
 }
 

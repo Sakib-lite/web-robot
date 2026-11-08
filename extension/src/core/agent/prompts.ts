@@ -20,7 +20,7 @@ export function systemPrompt(workspaceRoot?: string, taskDir?: string, opts: { s
   }
   if (opts.subAgent) {
     rules.push(
-      '8. sub_agent runs a one-item research sub-agent with a fresh context: give it ONE item plus any context it needs and it returns a sourced digest you can append from. Use it for per-item research across many similar items (each/all/N times); never for a single lookup, and never when one exec script or one page visit suffices.',
+      '8. sub_agent runs a one-item read-only research sub-agent with a fresh context: give it ONE item plus any context it needs and it returns a sourced digest (also auto-saved to subagents.md). Run ONE at a time and append each returned digest to the deliverable file before spawning the next. Use it for per-item research across many similar items (each/all/N times); never for a single lookup, and never when one exec script or one page visit suffices.',
     );
   }
   return rules.join('\n');

@@ -190,6 +190,26 @@ describe('runTask', () => {
     expect(result.steps[1]!.detail).toContain('sub-agent limit of 1');
   });
 
+  it('cancels queued sub_agent calls so the parent handles each digest first', async () => {
+    const subAgent = vi.fn().mockResolvedValue('sub-agent 1 ("item a") done: fact — url');
+    const batched = reply('', [
+      toolCall('sub_agent', { task: 'item a' }),
+      toolCall('sub_agent', { task: 'item b' }),
+      toolCall('sub_agent', { task: 'item c' }),
+    ]);
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(batched)
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'file written between spawns' })]));
+    const result = await runTask('three items', deps({ chat, subAgent }));
+
+    expect(subAgent).toHaveBeenCalledExactlyOnceWith('item a', undefined);
+    expect(result.status).toBe('done');
+    const secondContext = (chat.mock.calls[1]![0] as ChatMessage[]).map((m) => m.content ?? '').join('\n');
+    expect(secondContext).toContain('2 queued sub_agent call(s) were cancelled');
+    expect(secondContext).toContain('ONE sub_agent at a time');
+  });
+
   it('requires confirmation for dangerous clicks and skips them when declined', async () => {
     const snap = snapshot({ elements: [{ ref: 'e1', tag: 'button', kind: 'button', name: 'Place order' }] });
     const driver = fakeDriver({

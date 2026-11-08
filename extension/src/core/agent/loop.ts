@@ -451,6 +451,13 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
         continue;
       }
       subAgentCount++;
+      const queuedSpawns = pendingCalls.filter((c) => c.name === 'sub_agent').length;
+      if (queuedSpawns > 0) {
+        pendingCalls = pendingCalls.filter((c) => c.name !== 'sub_agent');
+        notes.push(
+          `Your other ${queuedSpawns} queued sub_agent call(s) were cancelled: run ONE sub_agent at a time. Append this digest to the deliverable file now, then spawn the next item yourself. Every digest is also saved to subagents.md.`,
+        );
+      }
       const started = Date.now();
       let report: string;
       try {
