@@ -211,3 +211,112 @@ describe('task-bound tab targeting', () => {
     expect(res).toEqual({ ok: false, error: 'task tab 42 no longer exists' });
   });
 });
+
+function fakeDebugger(over: Partial<Record<'attach' | 'detach' | 'sendCommand', (...args: never[]) => unknown>> = {}) {
+  const commands: Array<{ method: string; params?: Record<string, unknown> }> = [];
+  const api = {
+    attach: vi.fn(async () => undefined),
+    detach: vi.fn(async () => undefined),
+    sendCommand: vi.fn(async (_target: unknown, method: string, params?: Record<string, unknown>) => {
+      commands.push({ method, params });
+      return {};
+    }),
+    onDetach: { addListener: vi.fn() },
+    ...over,
+  };
+  return { api: api as unknown as typeof chrome.debugger, commands };
+}
+
+function activeTabs(over: Partial<Record<'query' | 'sendMessage' | 'captureVisibleTab' | 'update', (...args: never[]) => unknown>> = {}) {
+  return fakeTabs({
+    query: async () => [{ id: 7, url: 'https://t.dev', title: 'T', active: true, windowId: 3 }],
+    sendMessage: async () => ({ ok: true }) as ContentResponse,
+    ...over,
+  });
+}
+
+describe('cdp actions', () => {
+  it('presses keys as trusted input through the debugger', async () => {
+    const dbg = fakeDebugger();
+    const res = await handleMessage(
+      { type: 'RUN_ACTION', action: { type: 'press', key: 'Enter', modifiers: ['control'] } },
+      { tabs: activeTabs(), scripting: fakeScripting(), debugger: dbg.api },
+    );
+    expect(res).toEqual({ ok: true, detail: 'pressed Enter (trusted)' });
+    const methods = dbg.commands.map((c) => c.method);
+    expect(methods).toEqual(['Input.dispatchKeyEvent', 'Input.dispatchKeyEvent']);
+    expect(dbg.commands[0]!.params).toMatchObject({ type: 'keyDown', key: 'Enter', text: '\r', modifiers: 2 });
+    expect(dbg.commands[1]!.params).toMatchObject({ type: 'keyUp', key: 'Enter' });
+  });
+
+  it('falls back to the content script when the debugger cannot attach', async () => {
+    const dbg = fakeDebugger({ attach: vi.fn(async () => {
+      throw new Error('cannot access');
+    }) as never });
+    const sendMessage = tabResponse((message) => {
+      if (message.type === 'ACT') return { ok: true, detail: `pressed ${message.action.type === 'press' ? message.action.key : 'x'}` };
+      return { ok: true };
+    });
+    const tabs = activeTabs({ sendMessage });
+    const res = await handleMessage(
+      { type: 'RUN_ACTION', action: { type: 'press', key: 'Enter' } },
+      { tabs, scripting: fakeScripting(), debugger: dbg.api },
+    );
+    expect(res).toEqual({ ok: true, detail: 'pressed Enter' });
+  });
+
+  it('trusted-clicks at the element center after resolving its rect', async () => {
+    const dbg = fakeDebugger();
+    const sendMessage = tabResponse((message) => {
+      if (message.type === 'RECT') return { ok: true, rect: { x: 10, y: 20, w: 100, h: 40 } };
+      return { ok: true };
+    });
+    const res = await handleMessage(
+      { type: 'RUN_ACTION', action: { type: 'click', ref: 'e3', trusted: true } },
+      { tabs: activeTabs({ sendMessage }), scripting: fakeScripting(), debugger: dbg.api },
+    );
+    expect(res).toEqual({ ok: true, detail: 'trusted clicked e3' });
+    expect(dbg.commands.find((c) => c.method === 'Input.dispatchMouseEvent' && c.params?.type === 'mousePressed')!.params).toMatchObject({ x: 60, y: 40 });
+  });
+
+  it('clicks at viewport coordinates and hovers by ref', async () => {
+    const dbg = fakeDebugger();
+    const sendMessage = tabResponse((message) => {
+      if (message.type === 'RECT') return { ok: true, rect: { x: 0, y: 0, w: 10, h: 10 } };
+      return { ok: true };
+    });
+    const tabs = activeTabs({ sendMessage });
+    await handleMessage({ type: 'RUN_ACTION', action: { type: 'click_at', x: 120, y: 55 } }, { tabs, scripting: fakeScripting(), debugger: dbg.api });
+    await handleMessage({ type: 'RUN_ACTION', action: { type: 'hover', ref: 'e1' } }, { tabs, scripting: fakeScripting(), debugger: dbg.api });
+    expect(dbg.commands.find((c) => c.params?.type === 'mousePressed')!.params).toMatchObject({ x: 120, y: 55 });
+    expect(dbg.commands.some((c) => c.method === 'Input.dispatchMouseEvent' && c.params?.type === 'mouseMoved' && c.params?.y === 5)).toBe(true);
+  });
+
+  it('evaluates javascript in the page and surfaces exceptions', async () => {
+    const ok = fakeDebugger({ sendCommand: vi.fn(async () => ({ result: { value: { answer: 42 } } })) as never });
+    const res = await handleMessage(
+      { type: 'RUN_ACTION', action: { type: 'evaluate_js', expression: 'window.__x' } },
+      { tabs: activeTabs(), scripting: fakeScripting(), debugger: ok.api },
+    );
+    expect(res).toMatchObject({ ok: true, detail: '{"answer":42}' });
+
+    const bad = fakeDebugger({ sendCommand: vi.fn(async () => ({ exceptionDetails: { text: 'SyntaxError', exception: { description: 'unexpected token' } } })) as never });
+    const res2 = await handleMessage(
+      { type: 'RUN_ACTION', action: { type: 'evaluate_js', expression: 'x x' } },
+      { tabs: activeTabs(), scripting: fakeScripting(), debugger: bad.api },
+    );
+    expect(res2).toMatchObject({ ok: false });
+    if (!res2.ok) expect(res2.error).toContain('SyntaxError');
+  });
+
+  it('captures a viewport screenshot and returns the data url', async () => {
+    const dbg = fakeDebugger();
+    const tabs = activeTabs({ captureVisibleTab: vi.fn(async () => 'data:image/jpeg;base64,AAA') as never });
+    const res = await handleMessage(
+      { type: 'RUN_ACTION', action: { type: 'screenshot' } },
+      { tabs, scripting: fakeScripting(), debugger: dbg.api },
+    );
+    expect(res).toMatchObject({ ok: true });
+    if (res.ok) expect((res.data as { dataUrl: string }).dataUrl).toBe('data:image/jpeg;base64,AAA');
+  });
+});

@@ -147,17 +147,25 @@ function describeAction(action: Action): string {
     case 'close_tab':
       return `close_tab ${action.tabId}`;
     case 'click':
-      return `click ${action.ref}`;
+      return action.trusted ? `trusted click ${action.ref}` : `click ${action.ref}`;
+    case 'click_at':
+      return `click_at ${Math.round(action.x)},${Math.round(action.y)}`;
+    case 'hover':
+      return `hover ${action.ref}`;
     case 'fill':
       return `fill ${action.ref} "${action.text.slice(0, 40)}"`;
     case 'select':
       return `select ${action.ref} "${action.option}"`;
     case 'press':
-      return `press ${action.key}`;
+      return `press ${action.key}${action.modifiers?.length ? `+${action.modifiers.join('+')}` : ''}`;
     case 'scroll':
       return `scroll ${action.direction}${action.amount ? ` ${action.amount}` : ''}`;
     case 'wait':
       return `wait ${action.ms}ms`;
+    case 'evaluate_js':
+      return `evaluate_js ${action.expression.replace(/\s+/g, ' ').slice(0, 50)}`;
+    case 'screenshot':
+      return `screenshot${action.fullPage ? ' (full page)' : ''}`;
     case 'extract':
       return `extract "${action.goal.slice(0, 40)}"`;
   }
@@ -173,7 +181,8 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   const seenPageStates = new Set<string>();
   const repeatCounts = new Map<string, number>();
   const extractsOnState = new Map<string, number>();
-  let effectProbe: { call: string; key: string } | null = null;
+  let effectProbe: { call: string; key: string; ref?: string } | null = null;
+  const trustedRetried = new Set<string>();
   const blockedKeys = new Set<string>();
   const readLedger = new Set<string>();
   let latestLocal: { label: string; text: string } | null = null;
@@ -270,7 +279,11 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       if (snapshot?.text) seenPageStates.add(snapshot.text.slice(0, 500));
       if (effectProbe && snapshot) {
         const nowKey = `${snapshot.url}|${snapshot.title}|${snapshot.text.length}|${snapshot.text.slice(0, 1500)}`;
-        if (nowKey === effectProbe.key) {
+        if (nowKey === effectProbe.key && effectProbe.ref && !trustedRetried.has(effectProbe.ref)) {
+          trustedRetried.add(effectProbe.ref);
+          pendingCalls.unshift({ id: `trusted-${Date.now()}`, name: 'click', args: { ref: effectProbe.ref, trusted: true } });
+          notes.push(`${effectProbe.call} produced no visible change - retrying it once as a trusted (debugger) click automatically.`);
+        } else if (nowKey === effectProbe.key) {
           notes.push(`${effectProbe.call} had no visible effect on the page - the page state is identical. That element is a dead end; pick a different element or approach.`);
         }
         effectProbe = null;
@@ -604,6 +617,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
       effectProbe = {
         call: describeAction(action),
         key: `${snapshot.url}|${snapshot.title}|${snapshot.text.length}|${snapshot.text.slice(0, 1500)}`,
+        ...(action.type === 'click' && !action.trusted ? { ref: action.ref } : {}),
       };
     }
     const actionStarted = Date.now();
@@ -638,6 +652,25 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     });
     if (!result.ok && result.detail.includes('take a new snapshot')) {
       notes.push('That ref no longer exists - the page changed after your last action. Use refs from the LATEST observation only.');
+    }
+    if (result.ok && action.type === 'screenshot') {
+      const shot = result.data as { dataUrl?: string; width?: number; height?: number } | undefined;
+      const b64 = shot?.dataUrl?.replace(/^data:image\/\w+;base64,/, '');
+      if (deps.workspace && taskDir && b64) {
+        const ext = shot?.dataUrl?.includes('image/png') ? 'png' : 'jpg';
+        const path = `${taskDir}/screenshots/step-${index + 1}.${ext}`;
+        try {
+          await deps.workspace.plane.write(path, b64, false, 'base64');
+          filesTouched.set(path, 'screenshot');
+          record(true, describeAction(action), `${shot?.width || '?'}x${shot?.height || '?'} saved ${path}`);
+        } catch {
+          record(true, describeAction(action), `${shot?.width || '?'}x${shot?.height || '?'} (workspace write failed)`);
+        }
+      } else {
+        record(true, describeAction(action), `${shot?.width || '?'}x${shot?.height || '?'} (no workspace - not saved)`);
+      }
+      index++;
+      continue;
     }
     if (result.ok && action.type === 'extract') {
       const text = result.detail;

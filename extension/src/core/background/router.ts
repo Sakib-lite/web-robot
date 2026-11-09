@@ -1,5 +1,8 @@
 import type { Action } from '../driver/types';
 import type { ContentRequest, ContentResponse, PanelRequest, PanelResponse } from '../messaging/protocol';
+import { cdpFor, type Cdp, type DebuggerApi } from '../driver/cdp';
+import { capture } from '../driver/capture';
+import { modifiersMask, resolveKey } from '../driver/keys';
 
 const CONTENT_SCRIPT_FILE = 'content-scripts/content.js';
 
@@ -128,6 +131,113 @@ async function runBrowserAction(tab: chrome.tabs.Tab | undefined, action: Action
 export interface BrowserApis {
   tabs: TabsApi;
   scripting: ScriptingApi;
+  debugger?: DebuggerApi;
+}
+
+const EVAL_RESULT_CHARS = 50000;
+
+function clampInt(value: unknown, min: number, max: number, dflt: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return dflt;
+  return Math.min(Math.max(Math.round(value), min), max);
+}
+
+async function rectFor(tabsApi: TabsApi, tabId: number, ref: string): Promise<{ x: number; y: number; w: number; h: number } | string> {
+  const res = await sendToTab(tabsApi, tabId, { type: 'RECT', ref });
+  if (!res.ok) return res.error;
+  if (!res.rect) return 'content script returned no rect';
+  return res.rect;
+}
+
+async function mouseClickAt(send: (method: string, params?: Record<string, unknown>) => Promise<unknown>, x: number, y: number): Promise<void> {
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none' });
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+}
+
+async function runCdpAction(
+  tab: chrome.tabs.Tab,
+  action: Action,
+  apis: BrowserApis,
+  cdp: Cdp,
+): Promise<PanelResponse | null> {
+  const tabId = tab.id as number;
+  if (action.type === 'click' && action.trusted) {
+    const rect = await rectFor(apis.tabs, tabId, action.ref);
+    if (typeof rect === 'string') return { ok: false, error: rect };
+    await cdp.withDebugger(tabId, (send) => mouseClickAt(send, rect.x + rect.w / 2, rect.y + rect.h / 2));
+    return { ok: true, detail: `trusted clicked ${action.ref}` };
+  }
+  if (action.type === 'click_at') {
+    await cdp.withDebugger(tabId, (send) => mouseClickAt(send, action.x, action.y));
+    return { ok: true, detail: `trusted clicked at ${Math.round(action.x)},${Math.round(action.y)}` };
+  }
+  if (action.type === 'hover') {
+    const rect = await rectFor(apis.tabs, tabId, action.ref);
+    if (typeof rect === 'string') return { ok: false, error: rect };
+    await cdp.withDebugger(tabId, (send) =>
+      send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: rect.x + rect.w / 2, y: rect.y + rect.h / 2, button: 'none' }),
+    );
+    return { ok: true, detail: `hovered ${action.ref}` };
+  }
+  if (action.type === 'evaluate_js') {
+    const raw = (await cdp.withDebugger(tabId, (send) =>
+      send('Runtime.evaluate', {
+        expression: action.expression,
+        returnByValue: true,
+        awaitPromise: action.awaitPromise !== false,
+        timeout: 10000,
+      }),
+    )) as { result?: { value?: unknown }; exceptionDetails?: { text: string; exception?: { description?: string } } };
+    if (raw.exceptionDetails) {
+      const details = raw.exceptionDetails;
+      return { ok: false, error: `${details.text}: ${details.exception?.description ?? ''}`.slice(0, 300) };
+    }
+    let serialized = JSON.stringify(raw.result?.value === undefined ? null : raw.result?.value) ?? 'null';
+    if (serialized.length > EVAL_RESULT_CHARS) serialized = serialized.slice(0, EVAL_RESULT_CHARS) + '…[truncated]';
+    return { ok: true, detail: serialized.slice(0, 800), data: { value: serialized } };
+  }
+  if (action.type === 'screenshot') {
+    const shot = await capture(
+      tab,
+      {
+        fullPage: action.fullPage === true,
+        format: action.format === 'png' ? 'png' : 'jpeg',
+        quality: clampInt(action.quality, 1, 100, 80),
+        maxWidth: clampInt(action.maxWidth, 100, 4096, 1280),
+      },
+      {
+        captureVisibleTab: (windowId, options) =>
+          (apis.tabs.captureVisibleTab as unknown as (w: number, o: { format: string; quality: number }) => Promise<string>)(windowId, options),
+        activateTab: async (id) => {
+          await apis.tabs.update(id, { active: true });
+        },
+        fullPageCapture: (id, format, quality) =>
+          cdp.withDebugger(id, (send) =>
+            send('Page.captureScreenshot', { format, quality, captureBeyondViewport: true }),
+          ).then((res) => {
+            const data = (res as { data?: string }).data;
+            if (!data) throw new Error('Page.captureScreenshot returned no image');
+            return `data:image/${format};base64,${data}`;
+          }),
+      },
+    );
+    return { ok: true, detail: `${shot.width || '?'}x${shot.height || '?'} ${shot.dataUrl.length} chars`, data: shot };
+  }
+  if (action.type === 'press') {
+    try {
+      const def = resolveKey(action.key);
+      const modifiers = Array.isArray(action.modifiers) ? modifiersMask(action.modifiers) : 0;
+      await cdp.withDebugger(tabId, async (send) => {
+        const base = { modifiers, key: def.key, code: def.code, windowsVirtualKeyCode: def.windowsVirtualKeyCode, nativeVirtualKeyCode: def.windowsVirtualKeyCode };
+        await send('Input.dispatchKeyEvent', { type: 'keyDown', ...base, ...(def.text !== undefined ? { text: def.text, unmodifiedText: def.text } : {}) });
+        await send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
+      });
+      return { ok: true, detail: `pressed ${action.key} (trusted)` };
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 export async function handleMessage(message: PanelRequest, apis: BrowserApis): Promise<PanelResponse> {
@@ -173,8 +283,20 @@ export async function handleMessage(message: PanelRequest, apis: BrowserApis): P
     }
 
     if (!tab.url?.startsWith('http')) return { ok: false, error: `cannot act on this page (${tab.url ?? 'unknown url'})` };
+
+    if (apis.debugger) {
+      const cdpRes = await runCdpAction(tab, action, apis, cdpFor(apis.debugger));
+      if (cdpRes) return cdpRes;
+    }
+
+    const CONTENT_ACTIONS = new Set(['click', 'fill', 'select', 'press', 'scroll', 'wait', 'extract']);
+    if (!CONTENT_ACTIONS.has(action.type)) {
+      return { ok: false, error: `action ${action.type} needs the debugger, which is unavailable` };
+    }
+    const contentAction = action as Extract<Action, { type: 'click' | 'fill' | 'select' | 'press' | 'scroll' | 'wait' | 'extract' }>;
+
     await ensureInjected(tabsApi, scriptingApi, tab.id);
-    const res = await sendToTab(tabsApi, tab.id, { type: 'ACT', action });
+    const res = await sendToTab(tabsApi, tab.id, { type: 'ACT', action: contentAction });
     if (!res.ok) return { ok: false, error: res.error };
     return { ok: true, detail: res.detail ?? `${action.type} done` };
   }
@@ -183,7 +305,7 @@ export async function handleMessage(message: PanelRequest, apis: BrowserApis): P
 }
 
 export function startBackground() {
-  const apis: BrowserApis = { tabs: chrome.tabs, scripting: chrome.scripting };
+  const apis: BrowserApis = { tabs: chrome.tabs, scripting: chrome.scripting, debugger: chrome.debugger };
   chrome.runtime.onMessage.addListener((message: PanelRequest, _sender, sendResponse) => {
     handleMessage(message, apis).then(sendResponse, (error: unknown) => {
       sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });

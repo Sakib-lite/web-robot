@@ -53,10 +53,14 @@ export const toolSpecs = {
   new_tab: { description: 'Open a new tab, optionally at a URL, and make it active.', schema: z.object({ url: z.string().optional() }) },
   switch_tab: { description: 'Switch to an open tab by its id (see the tab list in the observation).', schema: z.object({ tabId: z.number().int() }) },
   close_tab: { description: 'Close a tab by its id.', schema: z.object({ tabId: z.number().int() }) },
-  click: { description: 'Click an element by its ref from the latest page observation.', schema: z.object({ ref: z.string() }) },
+  click: { description: 'Click an element by its ref from the latest page observation. If the page ignores the click, the runtime automatically retries it once as a trusted (debugger) click.', schema: z.object({ ref: z.string(), trusted: z.boolean().optional() }) },
+  click_at: { description: 'Click at viewport coordinates with trusted input - last resort when the element you need has no usable ref.', schema: z.object({ x: z.number(), y: z.number() }) },
+  hover: { description: 'Move the mouse over an element by ref (trusted) - reveals hover menus and tooltips.', schema: z.object({ ref: z.string() }) },
   fill: { description: 'Replace the text of an input or textarea by ref.', schema: z.object({ ref: z.string(), text: z.string() }) },
   select: { description: 'Choose an option of a select dropdown by ref.', schema: z.object({ ref: z.string(), option: z.string() }) },
-  press: { description: 'Press a key on the focused element, e.g. Enter or Escape.', schema: z.object({ key: z.string() }) },
+  press: { description: 'Press a key on the focused element, e.g. Enter or Escape - sent as trusted input, so Enter actually submits forms.', schema: z.object({ key: z.string(), modifiers: z.array(z.enum(['alt', 'control', 'meta', 'shift'])).optional() }) },
+  evaluate_js: { description: 'Run JavaScript inside the page (page context, bypasses its CSP). Use it to read data the page computes - window state, JSON blobs, fetch() results - or to act through the page\'s own code. Returns the JSON result.', schema: z.object({ expression: z.string().min(1), await_promise: z.boolean().optional() }) },
+  screenshot: { description: 'Capture the page as an image saved to your task folder under screenshots/ (full_page for the whole page). Use it when the element tree is confusing or the page state should be visible to a human.', schema: z.object({ full_page: z.boolean().optional(), format: z.enum(['jpeg', 'png']).optional(), max_width: z.number().int().min(100).max(4096).optional() }) },
   scroll: { description: 'Scroll the page up or down.', schema: z.object({ direction: z.enum(['up', 'down']), amount: z.number().int().optional() }) },
   extract: { description: 'Read targeted information from the page. Returns the main content text; use it after each page of a listing task.', schema: z.object({ goal: z.string() }) },
   wait: { description: 'Wait before the next observation, at most 5000 ms.', schema: z.object({ ms: z.number().int().min(0).max(5000) }) },
@@ -134,13 +138,44 @@ export function parseCall(name: string, args: Record<string, unknown>): { ok: tr
     case 'close_tab':
       return { ok: true, call: { kind: 'action', action: { type: 'close_tab', tabId: Number(a.tabId) } } };
     case 'click':
-      return { ok: true, call: { kind: 'action', action: { type: 'click', ref: String(a.ref) } } };
+      return { ok: true, call: { kind: 'action', action: { type: 'click', ref: String(a.ref), ...(a.trusted !== undefined ? { trusted: a.trusted === true } : {}) } } };
+    case 'click_at':
+      return { ok: true, call: { kind: 'action', action: { type: 'click_at', x: Number(a.x), y: Number(a.y) } } };
+    case 'hover':
+      return { ok: true, call: { kind: 'action', action: { type: 'hover', ref: String(a.ref) } } };
     case 'fill':
       return { ok: true, call: { kind: 'action', action: { type: 'fill', ref: String(a.ref), text: String(a.text) } } };
     case 'select':
       return { ok: true, call: { kind: 'action', action: { type: 'select', ref: String(a.ref), option: String(a.option) } } };
     case 'press':
-      return { ok: true, call: { kind: 'action', action: { type: 'press', key: String(a.key) } } };
+      return {
+        ok: true,
+        call: {
+          kind: 'action',
+          action: { type: 'press', key: String(a.key), ...(Array.isArray(a.modifiers) ? { modifiers: a.modifiers.map(String) } : {}) },
+        },
+      };
+    case 'evaluate_js':
+      return {
+        ok: true,
+        call: {
+          kind: 'action',
+          action: { type: 'evaluate_js', expression: String(a.expression), ...(a.await_promise !== undefined ? { awaitPromise: a.await_promise === true } : {}) },
+        },
+      };
+    case 'screenshot':
+      return {
+        ok: true,
+        call: {
+          kind: 'action',
+          action: {
+            type: 'screenshot',
+            ...(a.full_page !== undefined ? { fullPage: a.full_page === true } : {}),
+            ...(a.format !== undefined ? { format: a.format === 'png' ? ('png' as const) : ('jpeg' as const) } : {}),
+            ...(a.max_width !== undefined ? { maxWidth: Number(a.max_width) } : {}),
+          },
+        },
+      };
     case 'scroll':
       return {
         ok: true,

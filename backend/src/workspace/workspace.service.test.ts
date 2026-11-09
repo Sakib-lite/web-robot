@@ -44,6 +44,14 @@ describe('path safety', () => {
   });
 });
 
+describe('base64 writes', () => {
+  it('decodes base64 content into binary files', async () => {
+    await service.write('shots/a.png', 'QUJD', false, 'base64');
+    const bytes = await readFile(join(root, 'shots/a.png'));
+    expect(bytes.equals(Buffer.from('ABC'))).toBe(true);
+  });
+});
+
 describe('file ops', () => {
   it('write → read → edit roundtrip with unique-match enforcement', async () => {
     await service.write('notes/a.md', '# Title\nline two\nline three\n');

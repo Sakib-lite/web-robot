@@ -111,7 +111,7 @@ export async function maybeRunRemoteWork(deps: RemoteDeps): Promise<string> {
 
 export function defaultRemoteDeps(): RemoteDeps {
   return remoteDepsForDriver(
-    () => createDriver((message) => handleMessage(message, { tabs: chrome.tabs, scripting: chrome.scripting })),
+    () => createDriver((message) => handleMessage(message, { tabs: chrome.tabs, scripting: chrome.scripting, debugger: chrome.debugger })),
     'sw',
   );
 }

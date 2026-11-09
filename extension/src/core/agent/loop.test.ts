@@ -290,9 +290,53 @@ describe('runTask', () => {
 
     expect(result.status).toBe('done');
     expect(result.summary).toContain('moved on');
-    expect(act).toHaveBeenCalledTimes(4);
+    expect(act).toHaveBeenCalledTimes(5);
+    expect((act.mock.calls as unknown as Array<[Action]>).some(([a]) => a.type === 'click' && a.trusted === true)).toBe(true);
     const blockedSteps = result.steps.filter((s) => !s.ok && s.detail.includes('blocked'));
     expect(blockedSteps.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('saves screenshots into the task folder as binary files', async () => {
+    const writes: Array<{ path: string; content: string; encoding?: string }> = [];
+    const plane = {
+      write: async (path: string, content: string, _onlyIfNew?: boolean, encoding?: 'base64') => {
+        writes.push({ path, content, encoding });
+        return { bytes: content.length };
+      },
+    };
+    const driver = fakeDriver({
+      act: async () => ({ ok: true, detail: 'captured', data: { dataUrl: 'data:image/png;base64,QUJD', width: 800, height: 600 } }),
+    });
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('screenshot', {})]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'shot saved' })]));
+    const result = await runTask('take a screenshot', {
+      driver,
+      chat,
+      askUser: async () => null,
+      taskId: 9,
+      workspace: { plane: plane as never, root: '/tmp/robots' },
+    });
+
+    expect(result.status).toBe('done');
+    expect(writes).toEqual([{ path: '.web-robot/tasks/9/screenshots/step-1.png', content: 'QUJD', encoding: 'base64' }]);
+    expect(result.steps[0]!.detail).toContain('screenshots/step-1.png');
+    expect(result.steps[0]!.detail).toContain('800x600');
+  });
+
+  it('reports a screenshot even without a workspace to save it into', async () => {
+    const driver = fakeDriver({
+      act: async () => ({ ok: true, detail: 'captured', data: { dataUrl: 'data:image/jpeg;base64,QQ==', width: 10, height: 10 } }),
+    });
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('screenshot', { full_page: true })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'ok' })]));
+    const result = await runTask('shoot', deps({ driver, chat }));
+    expect(result.status).toBe('done');
+    expect(result.steps[0]!.call).toBe('screenshot (full page)');
+    expect(result.steps[0]!.detail).toContain('not saved');
   });
 
   it('lets the agent switch targets after a blocked sub-goal', async () => {
@@ -394,7 +438,7 @@ describe('runTask', () => {
     const result = await runTask('click three rows', deps({ driver, chat: chat as never }));
     expect(result.status).toBe('done');
     expect(result.summary).toContain('3 distinct elements clicked');
-    expect(acts.filter((a) => a === 'click')).toHaveLength(3);
+    expect(acts.filter((a) => a === 'click')).toHaveLength(6);
     expect(chat).toHaveBeenCalledTimes(2);
   });
 

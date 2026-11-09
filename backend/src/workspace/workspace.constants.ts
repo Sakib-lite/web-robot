@@ -3,6 +3,7 @@ export const READ_MAX_LIMIT = 1000;
 export const READ_LINE_TRUNCATE = 500;
 export const READ_MAX_FILE_BYTES = 10 * 1024 * 1024;
 export const MAX_WRITE_CHARS = 100 * 1024;
+export const MAX_WRITE_BASE64_BYTES = 8 * 1024 * 1024;
 export const MAX_EDIT_OLD_CHARS = 2 * 1024;
 export const MAX_LIST_ENTRIES = 200;
 export const EXEC_DEFAULT_TIMEOUT_MS = 120_000;

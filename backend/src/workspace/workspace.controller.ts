@@ -79,7 +79,7 @@ export class WorkspaceController {
 
   @Post('fs/write')
   async write(@Body() body: FsWriteDto) {
-    return this.guarded(() => this.workspace.write(body.path, body.content ?? '', body.onlyIfNew === true));
+    return this.guarded(() => this.workspace.write(body.path, body.content ?? '', body.onlyIfNew === true, body.encoding));
   }
 
   @Post('fs/edit')

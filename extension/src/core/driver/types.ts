@@ -33,10 +33,14 @@ export type Action =
   | { type: 'new_tab'; url?: string }
   | { type: 'switch_tab'; tabId: number }
   | { type: 'close_tab'; tabId: number }
-  | { type: 'click'; ref: string }
+  | { type: 'click'; ref: string; trusted?: boolean }
+  | { type: 'click_at'; x: number; y: number }
+  | { type: 'hover'; ref: string }
   | { type: 'fill'; ref: string; text: string }
   | { type: 'select'; ref: string; option: string }
-  | { type: 'press'; key: string }
+  | { type: 'press'; key: string; modifiers?: string[] }
+  | { type: 'evaluate_js'; expression: string; awaitPromise?: boolean }
+  | { type: 'screenshot'; fullPage?: boolean; format?: 'jpeg' | 'png'; quality?: number; maxWidth?: number }
   | { type: 'scroll'; direction: 'up' | 'down'; amount?: number }
   | { type: 'wait'; ms: number }
   | { type: 'extract'; goal: string };

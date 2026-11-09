@@ -1,5 +1,5 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
-import { DENY_PATTERNS, EXEC_DEFAULT_TIMEOUT_MS, EXEC_MAX_TIMEOUT_MS, EXEC_OUTPUT_CAP, MAX_EDIT_OLD_CHARS, MAX_LIST_ENTRIES, MAX_WRITE_CHARS, READ_DEFAULT_LIMIT, READ_LINE_TRUNCATE, READ_MAX_FILE_BYTES, READ_MAX_LIMIT } from './workspace.constants';
+import { DENY_PATTERNS, MAX_WRITE_BASE64_BYTES, EXEC_DEFAULT_TIMEOUT_MS, EXEC_MAX_TIMEOUT_MS, EXEC_OUTPUT_CAP, MAX_EDIT_OLD_CHARS, MAX_LIST_ENTRIES, MAX_WRITE_CHARS, READ_DEFAULT_LIMIT, READ_LINE_TRUNCATE, READ_MAX_FILE_BYTES, READ_MAX_LIMIT } from './workspace.constants';
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
@@ -260,7 +260,18 @@ export class WorkspaceService implements OnModuleInit {
     };
   }
 
-  async write(rel: string, content: string, onlyIfNew = false): Promise<{ bytes: number }> {
+  async write(rel: string, content: string, onlyIfNew = false, encoding?: 'base64'): Promise<{ bytes: number }> {
+    if (encoding === 'base64') {
+      const payload = Buffer.from(content, 'base64');
+      if (payload.length > MAX_WRITE_BASE64_BYTES) {
+        throw new WorkspaceError('TOO_LARGE', `decoded content is ${payload.length} bytes - the cap is ${MAX_WRITE_BASE64_BYTES}`);
+      }
+      const target = this.assertInside(rel);
+      await this.assertNoSymlinkEscape(target, rel);
+      await this.ensureParent(target);
+      await fs.writeFile(target, payload);
+      return { bytes: payload.length };
+    }
     if (content.length > MAX_WRITE_CHARS) {
       throw new WorkspaceError('TOO_LARGE', `content is ${content.length} chars - the cap is ${MAX_WRITE_CHARS}; write in appends`);
     }

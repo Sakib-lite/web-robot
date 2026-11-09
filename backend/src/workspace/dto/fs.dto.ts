@@ -12,6 +12,7 @@ export class FsWriteDto {
   path!: string;
   content!: string;
   onlyIfNew?: boolean;
+  encoding?: 'base64';
 }
 
 export class FsEditDto {

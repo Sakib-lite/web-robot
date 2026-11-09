@@ -31,8 +31,8 @@ export function createHttpPlane(getBackendUrl: () => Promise<string>): LocalPlan
     list: async (path) => (await call('/fs/list', { path: path ?? '.' })) as never,
     read: async (path, offset, limit): Promise<FileSlice> =>
       (await call('/fs/read', { path, ...(offset !== undefined ? { offset } : {}), ...(limit !== undefined ? { limit } : {}) })) as never,
-    write: async (path, content, onlyIfNew) =>
-      (await call('/fs/write', { path, content, ...(onlyIfNew ? { onlyIfNew: true } : {}) })) as never,
+    write: async (path, content, onlyIfNew, encoding) =>
+      (await call('/fs/write', { path, content, ...(onlyIfNew ? { onlyIfNew: true } : {}), ...(encoding ? { encoding } : {}) })) as never,
     edit: async (path, oldString, newString, replaceAll) =>
       (await call('/fs/edit', { path, oldString, newString, ...(replaceAll ? { replaceAll: true } : {}) })) as never,
     append: async (path, text) => (await call('/fs/append', { path, text })) as never,

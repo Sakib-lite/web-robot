@@ -14,6 +14,17 @@ export default defineContentScript({
         sendResponse({ ok: true, snapshot: buildSnapshot(document, message.skip ?? 0) });
         return;
       }
+      if (message?.type === 'RECT') {
+        const el = resolveRef(message.ref);
+        if (!el || !el.isConnected) {
+          sendResponse({ ok: false, error: `ref ${message.ref} not found on the page - take a new snapshot` });
+          return;
+        }
+        el.scrollIntoView({ block: 'center' });
+        const r = el.getBoundingClientRect();
+        sendResponse({ ok: true, rect: { x: r.x, y: r.y, w: r.width, h: r.height } });
+        return;
+      }
       if (message?.type === 'ACT') {
         runPageAction(message.action, resolveRef, window).then((result) => {
           sendResponse(result.ok ? { ok: true, detail: result.detail } : { ok: false, error: result.detail });

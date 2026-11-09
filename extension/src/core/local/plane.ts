@@ -38,7 +38,7 @@ export interface LocalPlane {
   describe(): Promise<WorkspaceInfo>;
   list(path?: string): Promise<{ entries: DirEntry[]; truncated: boolean }>;
   read(path: string, offset?: number, limit?: number): Promise<FileSlice>;
-  write(path: string, content: string, onlyIfNew?: boolean): Promise<{ bytes: number }>;
+  write(path: string, content: string, onlyIfNew?: boolean, encoding?: 'base64'): Promise<{ bytes: number }>;
   edit(path: string, oldString: string, newString: string, replaceAll?: boolean): Promise<{ line: number; occurrences: number }>;
   append(path: string, text: string): Promise<{ bytes: number; totalBytes: number }>;
   delete(path: string): Promise<{ path: string }>;
