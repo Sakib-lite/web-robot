@@ -1,8 +1,26 @@
+import { useState } from 'react';
+import SettingsView from './SettingsView';
+import TaskRunner from './TaskRunner';
+import { useProviders } from './useProviders';
+
 export default function App() {
+  const [view, setView] = useState<'task' | 'settings'>('task');
+  const { store, providers, refresh } = useProviders();
+
   return (
     <main className="app">
-      <h1 className="brand">web-robot</h1>
-      <p className="muted">Loading…</p>
+      <header className="top">
+        <h1 className="brand">web-robot</h1>
+        <nav>
+          <button className={view === 'task' ? 'tab on' : 'tab'} onClick={() => setView('task')}>
+            task
+          </button>
+          <button className={view === 'settings' ? 'tab on' : 'tab'} onClick={() => setView('settings')}>
+            settings
+          </button>
+        </nav>
+      </header>
+      {view === 'task' ? <TaskRunner store={store} /> : <SettingsView providers={providers} store={store} refresh={refresh} />}
     </main>
   );
 }

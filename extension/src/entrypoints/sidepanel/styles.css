@@ -1,6 +1,9 @@
 :root {
   color-scheme: light dark;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --line: color-mix(in srgb, currentColor 15%, transparent);
+  --ok: #2e9e5b;
+  --err: #c23e3e;
 }
 
 * {
@@ -21,11 +24,203 @@ body {
   gap: 10px;
 }
 
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .brand {
   font-size: 15px;
   margin: 0;
 }
 
+.tab {
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  color: inherit;
+  opacity: 0.6;
+}
+
+.tab.on {
+  opacity: 1;
+  border-bottom: 2px solid currentColor;
+}
+
 .muted {
   color: color-mix(in srgb, currentColor 55%, transparent);
+}
+
+.small {
+  font-size: 11px;
+}
+
+button {
+  font: inherit;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  color: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button.primary {
+  background: #3572e6;
+  border-color: #3572e6;
+  color: #fff;
+}
+
+button.danger {
+  border-color: color-mix(in srgb, var(--err) 55%, transparent);
+  color: var(--err);
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.runner textarea {
+  width: 100%;
+  font: inherit;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  resize: vertical;
+}
+
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.step.failed {
+  border-color: color-mix(in srgb, var(--err) 45%, transparent);
+}
+
+.step-call {
+  font-weight: 600;
+}
+
+.note {
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-top: 8px;
+}
+
+.note.ok {
+  border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent);
+}
+
+.note.err {
+  border: 1px solid color-mix(in srgb, var(--err) 45%, transparent);
+}
+
+.data {
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  margin: 6px 0 0;
+  font-size: 11px;
+}
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings h2 {
+  font-size: 13px;
+  margin: 0 0 8px;
+}
+
+.provider-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.provider {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.provider.active {
+  border-color: color-mix(in srgb, var(--ok) 55%, transparent);
+}
+
+.provider-main {
+  display: flex;
+  flex-direction: column;
+}
+
+.provider-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.settings label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.settings input {
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.presets {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.chip {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
 }
