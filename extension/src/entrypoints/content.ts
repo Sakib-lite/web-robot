@@ -1,13 +1,35 @@
+import { buildSnapshot, collectInteractive } from '@/core/driver/pageSnapshot';
+import { runPageAction } from '@/core/driver/pageActions';
+import type { ContentRequest, ContentResponse } from '@/core/messaging/protocol';
+
 export default defineContentScript({
   matches: ['<all_urls>'],
   runAt: 'document_idle',
   main() {
-    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    let elements: Element[] = [];
+
+    const resolveRef = (ref: string): Element | null => {
+      const index = Number(ref.replace(/^e/, '')) - 1;
+      return elements[index] ?? null;
+    };
+
+    chrome.runtime.onMessage.addListener((message: ContentRequest, _sender, sendResponse) => {
+      if (message?.type === 'SNAPSHOT') {
+        elements = collectInteractive(document);
+        sendResponse({ ok: true, snapshot: buildSnapshot(document) });
+        return;
+      }
+      if (message?.type === 'ACT') {
+        runPageAction(message.action, resolveRef, window).then((result) => {
+          sendResponse(result.ok ? { ok: true, detail: result.detail } : { ok: false, error: result.detail });
+        });
+        return true;
+      }
       if (message?.type === 'PING') {
         sendResponse({ ok: true, url: location.href });
         return;
       }
-      sendResponse({ ok: false, error: `unknown message type: ${message?.type}` });
+      sendResponse({ ok: false, error: `unknown message type: ${(message as { type?: string })?.type}` });
     });
   },
 });
