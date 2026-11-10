@@ -727,6 +727,8 @@ describe('StepRecord shape', () => {
     const files = new Map<string, string>();
     const plane: import('../local/plane').LocalPlane = {
       describe: async () => ({ enabled: true, root: '/tmp/robots' }),
+      webFetch: async (url) => ({ url, title: 'Fetched Page', text: `content of ${url}`, truncated: false }),
+      webSearch: async (query) => ({ results: [{ title: `about ${query}`, url: 'https://result.dev/x', snippet: 'a snippet' }] }),
       list: async () => ({ entries: [{ name: 'a.md', dir: false, size: 5 }], truncated: false }),
       read: async (path, offset = 1, limit = 300) => {
         const content = files.get(path);

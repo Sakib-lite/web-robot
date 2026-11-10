@@ -21,6 +21,24 @@ export async function runLocal(call: LocalCall, plane: LocalPlane, ledger: Set<s
   };
   try {
     switch (call.op) {
+      case 'fetch_url': {
+        const page = await plane.webFetch(call.url);
+        return {
+          ok: true,
+          detail: `"${page.title}" ${page.url} (${page.text.length} chars${page.truncated ? ', truncated' : ''})`,
+          label: `fetch ${call.url.slice(0, 80)}`,
+          text: `${page.title}\n${page.url}\n\n${page.text}`,
+          durationMs: dur(),
+        };
+      }
+      case 'search_web': {
+        const { results } = await plane.webSearch(call.query);
+        if (results.length === 0) {
+          return { ok: true, detail: 'no results', label: `search "${call.query.slice(0, 60)}"`, text: '(no results - reword the query)', durationMs: dur() };
+        }
+        const text = results.map((r, i) => `[${i + 1}] ${r.title}\n    ${r.url}\n    ${r.snippet}`).join('\n');
+        return { ok: true, detail: `${results.length} results`, label: `search "${call.query.slice(0, 60)}"`, text, durationMs: dur() };
+      }
       case 'list_dir': {
         const path = resolve(call.path);
         const { entries, truncated } = await plane.list(path);

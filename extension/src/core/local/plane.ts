@@ -34,6 +34,12 @@ export class PlaneError extends Error {
   }
 }
 
+export interface WebSearchHit {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
 export interface LocalPlane {
   describe(): Promise<WorkspaceInfo>;
   list(path?: string): Promise<{ entries: DirEntry[]; truncated: boolean }>;
@@ -44,4 +50,6 @@ export interface LocalPlane {
   delete(path: string): Promise<{ path: string }>;
   mkdir(path: string): Promise<{ path: string }>;
   exec(cmd: string, timeoutMs?: number, cwd?: string): Promise<ExecResult>;
+  webFetch(url: string): Promise<{ url: string; title: string; text: string; truncated: boolean }>;
+  webSearch(query: string): Promise<{ results: WebSearchHit[] }>;
 }

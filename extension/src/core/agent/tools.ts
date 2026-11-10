@@ -13,6 +13,8 @@ export type AgentCall =
   | { kind: 'fail'; reason: string };
 
 export type LocalCall =
+  | { op: 'fetch_url'; url: string }
+  | { op: 'search_web'; query: string }
   | { op: 'list_dir'; path?: string }
   | { op: 'read_file'; path: string; offset?: number; limit?: number }
   | { op: 'write_file'; path: string; content: string }
@@ -24,6 +26,10 @@ export type LocalCall =
 
 export function describeLocal(call: LocalCall): string {
   switch (call.op) {
+    case 'fetch_url':
+      return `fetch_url ${call.url.slice(0, 70)}`;
+    case 'search_web':
+      return `search_web "${call.query.slice(0, 50)}"`;
     case 'list_dir':
       return `list_dir ${call.path ?? '.'}`;
     case 'read_file':
@@ -76,13 +82,15 @@ export const toolSpecs = {
   append_file: { description: 'Append text to a workspace file (creates it if missing). The cheap way to grow a report: append each verified batch instead of rewriting the whole file.', schema: z.object({ path: z.string(), text: z.string() }) },
   delete_path: { description: 'Delete a file or directory tree in the workspace.', schema: z.object({ path: z.string() }) },
   mkdir: { description: 'Create a workspace directory, with parents.', schema: z.object({ path: z.string() }) },
+  fetch_url: { description: 'Fetch a public web page over http and return its readable text (no browser, no login) - the fast way to read a page. If it returns an empty shell or fails, the page needs JavaScript: then open it in the browser instead.', schema: z.object({ url: z.string().url() }) },
+  search_web: { description: 'Search the web (DuckDuckGo) and return the top results with title, url and snippet. Use it to find pages, then fetch_url to read them - much faster than searching in the browser.', schema: z.object({ query: z.string().min(1) }) },
   exec: { description: 'Run a shell command inside the workspace (cwd = workspace root; a few catastrophic commands are blocked). Output comes back capped head+tail - pipe through head/tail/grep yourself for big listings.', schema: z.object({ cmd: z.string(), timeout_ms: z.number().int().optional() }) },
   sub_agent: { description: 'Run a one-item research sub-agent with a fresh context: give it exactly ONE item (one university, one query) plus any context it needs; it opens its own tab, browses read-only and returns a digest with source urls. Use it for per-item research when the task has many similar items; a single lookup or one exec script is faster done yourself.', schema: z.object({ task: z.string().min(1), budget: z.number().int().min(6).max(30).optional() }) },
 } satisfies Record<string, ToolSpec>;
 
-const LOCAL_TOOLS = new Set(['list_dir', 'read_file', 'write_file', 'edit_file', 'append_file', 'delete_path', 'mkdir', 'exec']);
+const LOCAL_TOOLS = new Set(['fetch_url', 'search_web', 'list_dir', 'read_file', 'write_file', 'edit_file', 'append_file', 'delete_path', 'mkdir', 'exec']);
 
-const RESEARCH_TOOLS = new Set(['goto', 'new_tab', 'switch_tab', 'close_tab', 'click', 'fill', 'select', 'press', 'scroll', 'extract', 'wait', 'snapshot', 'note', 'done', 'fail']);
+const RESEARCH_TOOLS = new Set(['goto', 'new_tab', 'switch_tab', 'close_tab', 'click', 'fill', 'select', 'press', 'scroll', 'extract', 'wait', 'snapshot', 'fetch_url', 'search_web', 'note', 'done', 'fail']);
 
 export function toolDefs(opts: { workspace?: boolean; subAgent?: boolean; research?: boolean } = {}): ToolDef[] {
   return Object.entries(toolSpecs)
@@ -190,6 +198,10 @@ export function parseCall(name: string, args: Record<string, unknown>): { ok: tr
       return { ok: true, call: { kind: 'action', action: { type: 'extract', goal: String(a.goal) } } };
     case 'snapshot':
       return { ok: true, call: { kind: 'observe', ...(a.skip !== undefined ? { skip: Number(a.skip) } : {}) } };
+    case 'fetch_url':
+      return { ok: true, call: { kind: 'local', call: { op: 'fetch_url', url: String(a.url) } } };
+    case 'search_web':
+      return { ok: true, call: { kind: 'local', call: { op: 'search_web', query: String(a.query) } } };
     case 'list_dir':
       return { ok: true, call: { kind: 'local', call: { op: 'list_dir', ...(a.path !== undefined ? { path: String(a.path) } : {}) } } };
     case 'read_file':

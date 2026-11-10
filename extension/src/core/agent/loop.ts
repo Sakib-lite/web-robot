@@ -379,7 +379,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     if (!(agentCall.kind === 'local' && agentCall.call.op === 'exec')) execStreak = 0;
     const isRead = agentCall.kind === 'action' && agentCall.action.type === 'extract'
       || agentCall.kind === 'observe'
-      || (agentCall.kind === 'local' && (agentCall.call.op === 'read_file' || agentCall.call.op === 'list_dir'));
+      || (agentCall.kind === 'local' && ['read_file', 'list_dir', 'fetch_url', 'search_web'].includes(agentCall.call.op));
     if (isRead && consecutiveReads >= 3) {
       record(false, call.name, 'blocked: three read-only calls in a row without acting - ACT NOW (click a row, select, goto, write/append a file, or done)');
       notes.push('READS ARE BLOCKED until you act. You have only observed. Your next call must change something: click the next item, select an option, goto a page, or append_file your findings. Do not call extract, snapshot, read_file or list_dir again.');

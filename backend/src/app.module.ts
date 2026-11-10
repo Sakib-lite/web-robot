@@ -5,6 +5,7 @@ import { TasksModule } from './tasks/tasks.module';
 import { QueueModule } from './queue/queue.module';
 import { WorkspaceModule } from './workspace/workspace.module';
 import { ProvidersModule } from './providers/providers.module';
+import { WebModule } from './web/web.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { ProvidersModule } from './providers/providers.module';
     QueueModule,
     WorkspaceModule,
     ProvidersModule,
+    WebModule,
   ],
 })
 export class AppModule {}

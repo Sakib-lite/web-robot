@@ -49,7 +49,7 @@ describe('subagentPrompt', () => {
     const prompt = subagentPrompt('find who created Rust', 16);
     expect(prompt).toContain('"find who created Rust"');
     expect(prompt).toContain('ONE item');
-    expect(prompt).toContain('Start with new_tab');
+    expect(prompt).toContain('search_web to find pages, fetch_url to read them');
     expect(prompt).toContain('never navigate an already-open tab');
     expect(prompt).toContain('cannot ask the user');
     expect(prompt).toContain('about 16 steps');
