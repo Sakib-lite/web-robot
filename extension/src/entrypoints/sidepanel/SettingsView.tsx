@@ -8,8 +8,8 @@ type Draft = Pick<LlmProvider, 'name' | 'baseUrl' | 'apiKey' | 'model' | 'vision
 const EMPTY: Draft = { name: '', baseUrl: '', apiKey: '', model: '', visionModel: '' };
 
 const PRESETS: Array<{ label: string; baseUrl: string; model: string }> = [
-  { label: 'Z.ai GLM', baseUrl: 'https://api.z.ai/api/coding/paas/v4', model: 'glm-4.7' },
-  { label: 'BigModel', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4.7' },
+  { label: 'Z.ai Coding (glm-5.3)', baseUrl: 'https://api.z.ai/api/coding/paas/v4', model: 'glm-5.3' },
+  { label: 'BigModel (payg)', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4.7' },
   { label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'gpt-4o-mini' },
   { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
 ];
@@ -130,11 +130,11 @@ export default function SettingsView({ providers, store, refresh }: ReturnType<t
         </label>
         <label>
           api key
-          <input type="password" value={draft.apiKey} onChange={(e) => setDraft({ ...draft, apiKey: e.target.value })} placeholder="sk-…" />
+          <input type="password" value={draft.apiKey} onChange={(e) => setDraft({ ...draft, apiKey: e.target.value })} placeholder="Z.ai coding key" />
         </label>
         <label>
           model
-          <input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} placeholder="glm-4.7" />
+          <input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} placeholder="glm-5.3" />
         </label>
         <label>
           vision model <span className="muted">(optional)</span>
