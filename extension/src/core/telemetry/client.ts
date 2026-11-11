@@ -88,6 +88,7 @@ export async function runRemoteTask(
     workspace?: { plane: import('../local/plane').LocalPlane; root: string };
     preamble?: string;
     steps?: string[];
+    history?: import('../llm/chatClient').ChatMessage[];
   },
 ): Promise<void> {
   const telemetry = attachTelemetry(taskId, backendUrl);
@@ -119,6 +120,7 @@ export async function runRemoteTask(
       ...(deps.signal ? { signal: deps.signal } : {}),
       ...(deps.workspace ? { workspace: deps.workspace } : {}),
       ...(deps.preamble ? { preamble: deps.preamble } : {}),
+      ...(deps.history?.length ? { history: deps.history } : {}),
       ...(deps.steps?.length ? { steps: deps.steps } : {}),
       taskId,
       telemetry,

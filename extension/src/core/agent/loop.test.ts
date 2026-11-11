@@ -296,6 +296,25 @@ describe('runTask', () => {
     expect(blockedSteps.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('feeds the chat history as real turns on a continuation', async () => {
+    const chat = vi.fn(async () => reply('', [toolCall('done', { summary: 'continued with memory' })]));
+    await runTask('what else did you find?', {
+      driver: fakeDriver(),
+      chat,
+      askUser: async () => null,
+      history: [
+        { role: 'user', content: 'find the unis' },
+        { role: 'assistant', content: 'found 31 groups, saved shortlist.md' },
+      ],
+    });
+    const first = chat.mock.calls[0]![0] as ChatMessage[];
+    const roles = first.map((m) => m.role);
+    expect(roles).toEqual(expect.arrayContaining(['system', 'user', 'assistant', 'user']));
+    const joined = first.map((m) => m.content ?? '').join('\n');
+    expect(joined).toContain('found 31 groups, saved shortlist.md');
+    expect(joined).toContain('what else did you find?');
+  });
+
   it('saves screenshots into the task folder as binary files', async () => {
     const writes: Array<{ path: string; content: string; encoding?: string }> = [];
     const plane = {

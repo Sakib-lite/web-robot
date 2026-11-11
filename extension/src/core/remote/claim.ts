@@ -31,25 +31,23 @@ export async function runClaimedTask(
   if (taskModel) provider = { ...provider, model: taskModel };
   if (taskEffort) provider = { ...provider, thinking: taskEffort as 'off' | 'low' | 'high' | 'max' };
   let preamble: string | undefined;
+  let history: import('../llm/chatClient').ChatMessage[] | undefined;
   let maxSteps: number | undefined;
   if (lastMessage && lastMessage !== taskText) {
     try {
       const res = await fetch(`${backendUrl}/tasks/${taskId}/messages`, { signal: AbortSignal.timeout(4000) });
       if (res.ok) {
         const body = (await res.json()) as { messages?: Array<{ role: string; content: string }> };
-        const lines = (body.messages ?? [])
+        history = (body.messages ?? [])
           .filter((m) => m.content !== lastMessage)
-          .map((m) => `[${m.role}] ${m.content.slice(0, 700)}`);
-        const digest = lines.slice(-14).join('\n\n');
-        preamble = [
-          `CONTINUATION of task #${taskId} - it ran before and has prior results (its files live in your task folder; read them instead of redoing work). The full conversation so far:`,
-          digest || '(no prior messages)',
-          `NOW DO THIS (the user's latest message): "${lastMessage}"`,
-        ].join('\n\n').slice(0, 9000);
+          .map((m) => ({
+            role: m.role === 'agent' ? ('assistant' as const) : ('user' as const),
+            content: m.content.slice(0, 4000),
+          }));
       }
     } catch {
-      preamble = `CONTINUATION of task #${taskId} (prior files live in your task folder). NOW DO THIS: "${lastMessage}"`;
     }
+    preamble = `CONTINUATION of task #${taskId}: this conversation continues below - the earlier turns are the real chat history, the task text is the user's latest message. Prior deliverables live in your task folder: read them before redoing anything.`;
   }
   if (skill) {
     try {
@@ -87,6 +85,7 @@ export async function runClaimedTask(
     ...(maxSteps ? { maxSteps } : {}),
     ...(preamble ? { preamble } : {}),
     ...(steps?.length ? { steps } : {}),
+    ...(history?.length ? { history } : {}),
     ...(info?.enabled ? { workspace: { plane, root: info.root } } : {}),
   });
 }

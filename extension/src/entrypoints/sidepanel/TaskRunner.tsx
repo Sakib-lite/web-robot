@@ -49,6 +49,8 @@ export default function TaskRunner({
   const [chatInput, setChatInput] = useState('');
   const [chatState, setChatState] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
+  const [chatReload, setChatReload] = useState(0);
+  const [backendUrlState, setBackendUrlState] = useState('');
   const [inputOpen, setInputOpen] = useState(true);
   const [recentTasks, setRecentTasks] = useState<RecentTask[]>([]);
   const [model, setModel] = useState('');
@@ -121,6 +123,7 @@ export default function TaskRunner({
     );
     if (telemetry.taskId) setTraceInfo({ taskId: telemetry.taskId, backendUrl });
 
+    setBackendUrlState(backendUrl);
     const plane = createHttpPlane(() => Promise.resolve(backendUrl));
     const workspaceInfo = await plane.describe().catch(() => null);
     const workspace = workspaceInfo?.enabled ? { plane, root: workspaceInfo.root } : undefined;
@@ -215,6 +218,7 @@ export default function TaskRunner({
       onRunningChange(null);
       abortRef.current = null;
       if (telemetry.taskId) setChatTaskId(telemetry.taskId);
+      setChatReload((k) => k + 1);
       void (async () => {
         try {
           const res = await fetch(`${backendUrl}/tasks?limit=12`);
@@ -303,7 +307,8 @@ export default function TaskRunner({
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setChatInput('');
-      setChatState(`queued task #${chatTaskId} - it runs and finishes on its own`);
+      setChatReload((k) => k + 1);
+      setChatState(`queued task #${chatTaskId} - it keeps the full conversation and runs on its own`);
     } catch (e) {
       setChatState(`failed: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -450,17 +455,22 @@ export default function TaskRunner({
         <ol className="steps">
           {steps.map((step) => (
             <li key={step.index} className={step.ok ? 'step' : 'step failed'}>
-              <span className="step-idx">{step.index}</span>
-              <span className="step-body">
-                <span className="step-call">{step.call}</span>
-                <span className="muted">{step.detail}</span>
-                {step.thinking && (
-                  <details className="step-thinking" open>
-                    <summary>thinking</summary>
-                    <pre>{step.thinking}</pre>
-                  </details>
-                )}
-              </span>
+              <details className="step-details">
+                <summary>
+                  <span className="step-idx">{step.index}</span>
+                  <span className="step-call">{step.call}</span>
+                  {!step.ok && <span className="muted"> ✗</span>}
+                </summary>
+                <span className="step-body">
+                  <span className="muted">{step.detail}</span>
+                  {step.thinking && (
+                    <details className="step-thinking">
+                      <summary>thinking</summary>
+                      <pre>{step.thinking}</pre>
+                    </details>
+                  )}
+                </span>
+              </details>
             </li>
           ))}
         </ol>
@@ -482,6 +492,8 @@ export default function TaskRunner({
         chatState={chatState}
         open={chatOpen}
         running={running}
+        reloadKey={chatReload}
+        backendUrl={backendUrlState || 'http://127.0.0.1:3010'}
         onToggle={() => setChatOpen((v) => !v)}
         onPick={setChatTaskId}
         onInput={setChatInput}

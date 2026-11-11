@@ -840,3 +840,75 @@ select {
   margin: 0;
   padding-left: 18px;
 }
+
+.chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 300px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--softer);
+  margin-top: 6px;
+}
+
+.bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 92%;
+  padding: 6px 9px;
+  border-radius: 9px;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.bubble-user {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--line) 45%, transparent);
+  border-bottom-right-radius: 3px;
+}
+
+.bubble-agent {
+  align-self: flex-start;
+  background: var(--soft);
+  border-bottom-left-radius: 3px;
+}
+
+.bubble-role {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.65;
+}
+
+.step-details > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.step-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.step-details > summary::before {
+  content: '▸';
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.step-details[open] > summary::before {
+  content: '▾';
+}
+
+.step-details .step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 0 4px 22px;
+}

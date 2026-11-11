@@ -45,6 +45,7 @@ export interface LoopDeps {
   taskId?: number;
   steps?: string[];
   preamble?: string;
+  history?: ChatMessage[];
   cleanupTabs?: boolean;
 }
 
@@ -306,6 +307,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
           : systemPrompt(deps.workspace?.root, taskDir ?? undefined, { subAgent: !!deps.subAgent }),
       },
       ...(deps.preamble ? [{ role: 'system' as const, content: deps.preamble }] : []),
+      ...(deps.history?.length ? deps.history : []),
       ...(deps.steps?.length
         ? [{
             role: 'system' as const,
