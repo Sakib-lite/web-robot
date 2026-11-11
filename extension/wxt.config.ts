@@ -7,5 +7,8 @@ export default defineConfig({
     description: 'Autonomous browser agent — tell it a task, it drives your tabs.',
     permissions: ['sidePanel', 'storage', 'tabs', 'scripting'],
     host_permissions: ['<all_urls>'],
+    action: {
+      default_title: 'web-robot',
+    },
   },
 });
