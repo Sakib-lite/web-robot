@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { memoryArea } from '../storage/area';
 import { createProviderStore, resolveActiveProvider, type LlmProviderInput } from './providers';
+import { HARDCODED_PROVIDER } from './seed';
 
 function zaiProvider(over: Partial<LlmProviderInput> = {}): LlmProviderInput {
   return { name: 'Z.ai', baseUrl: 'https://api.z.ai/api/coding/paas/v4', apiKey: 'sk-1', model: 'glm-4.7', ...over };
@@ -10,7 +11,7 @@ describe('provider store', () => {
   it('starts empty', async () => {
     const store = createProviderStore(memoryArea());
     expect(await store.list()).toEqual([]);
-    expect(await resolveActiveProvider(store)).toBeNull();
+    expect(await resolveActiveProvider(store)).toBe(HARDCODED_PROVIDER);
   });
 
   it('auto-activates the first saved provider', async () => {
@@ -18,6 +19,14 @@ describe('provider store', () => {
     const first = await store.save(zaiProvider());
     expect(first.active).toBe(true);
     expect((await resolveActiveProvider(store))?.id).toBe(first.id);
+  });
+
+  it('prefers a stored provider over the hardcoded fallback', async () => {
+    const store = createProviderStore(memoryArea());
+    const first = await store.save(zaiProvider());
+    const resolved = await resolveActiveProvider(store);
+    expect(resolved?.id).toBe(first.id);
+    expect(resolved).not.toBe(HARDCODED_PROVIDER);
   });
 
   it('keeps exactly one active provider on activate', async () => {

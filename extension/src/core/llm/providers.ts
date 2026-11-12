@@ -1,4 +1,5 @@
 import type { StorageArea } from '../storage/area';
+import { HARDCODED_PROVIDER } from './seed';
 
 export interface LlmProvider {
   id: string;
@@ -90,5 +91,5 @@ export function createProviderStore(area: StorageArea): ProviderStore {
 
 export async function resolveActiveProvider(store: ProviderStore): Promise<LlmProvider | null> {
   const providers = await store.list();
-  return providers.find((p) => p.active) ?? null;
+  return providers.find((p) => p.active) ?? HARDCODED_PROVIDER;
 }
