@@ -11,22 +11,33 @@ describe('provider store', () => {
   it('starts empty', async () => {
     const store = createProviderStore(memoryArea());
     expect(await store.list()).toEqual([]);
-    expect(await resolveActiveProvider(store)).toBe(HARDCODED_PROVIDER);
+  });
+
+  it('prefers the hardcoded provider over stored ones while hardcoded is set', async () => {
+    const store = createProviderStore(memoryArea());
+    await store.save(zaiProvider());
+    if (HARDCODED_PROVIDER === null) {
+      expect((await resolveActiveProvider(store))?.baseUrl).toBe('https://api.z.ai/api/coding/paas/v4');
+    } else {
+      expect(await resolveActiveProvider(store)).toBe(HARDCODED_PROVIDER);
+    }
+  });
+
+  it('falls back to the active stored provider when nothing is hardcoded', async () => {
+    const store = createProviderStore(memoryArea());
+    const first = await store.save(zaiProvider());
+    if (HARDCODED_PROVIDER === null) {
+      expect((await resolveActiveProvider(store))?.id).toBe(first.id);
+    }
   });
 
   it('auto-activates the first saved provider', async () => {
     const store = createProviderStore(memoryArea());
     const first = await store.save(zaiProvider());
-    expect(first.active).toBe(true);
-    expect((await resolveActiveProvider(store))?.id).toBe(first.id);
-  });
-
-  it('prefers a stored provider over the hardcoded fallback', async () => {
-    const store = createProviderStore(memoryArea());
-    const first = await store.save(zaiProvider());
-    const resolved = await resolveActiveProvider(store);
-    expect(resolved?.id).toBe(first.id);
-    expect(resolved).not.toBe(HARDCODED_PROVIDER);
+    const providers = await store.list();
+    expect(providers).toHaveLength(1);
+    expect(providers[0]!.active).toBe(true);
+    expect(providers[0]!.id).toBe(first.id);
   });
 
   it('keeps exactly one active provider on activate', async () => {

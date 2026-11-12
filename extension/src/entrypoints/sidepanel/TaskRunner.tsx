@@ -11,6 +11,7 @@ export default function TaskRunner({ store }: { store: ProviderStore }) {
   const [steps, setSteps] = useState<StepRecord[]>([]);
   const [result, setResult] = useState<TaskResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [usingProvider, setUsingProvider] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   async function run() {
@@ -23,6 +24,7 @@ export default function TaskRunner({ store }: { store: ProviderStore }) {
       setError('no active llm provider - add one in settings first');
       return;
     }
+    setUsingProvider(`${provider.name} · ${provider.model}`);
 
     setRunning(true);
     const controller = new AbortController();
@@ -71,6 +73,7 @@ export default function TaskRunner({ store }: { store: ProviderStore }) {
           stop
         </button>
         {running && <span className="muted">working…</span>}
+        {!running && usingProvider && <span className="muted">using {usingProvider}</span>}
       </div>
 
       {error && <div className="note err">{error}</div>}
