@@ -17,4 +17,12 @@ npm test
 npm run build
 ```
 
-Configure LLM providers in the side panel Settings tab: any OpenAI-compatible endpoint works (base URL, API key, model). GLM endpoints get `thinking` and higher `max_tokens` automatically.
+LLM access is configured per machine. Copy the env template and fill in your key before building — the value is inlined into the bundle at build time:
+
+```
+cp extension/.env.example extension/.env
+# edit extension/.env
+pnpm build
+```
+
+The `.env` file is gitignored. Alternatively, configure providers with API keys in the side panel Settings tab: any OpenAI-compatible endpoint works (base URL, API key, model). GLM endpoints get `thinking` and higher `max_tokens` automatically.
