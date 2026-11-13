@@ -19,7 +19,7 @@ const INTERACTIVE_SELECTOR = [
 ].join(', ');
 
 const MAX_ELEMENTS = 80;
-const MAX_TEXT = 2500;
+const MAX_TEXT = 4000;
 
 export function collectInteractive(root: ParentNode): Element[] {
   const nodes = Array.from(root.querySelectorAll(INTERACTIVE_SELECTOR));
@@ -116,7 +116,8 @@ export function describeElement(el: Element, index: number): ElementInfo {
 
 export function buildSnapshot(doc: Document): Snapshot {
   const elements = collectInteractive(doc).map((el, index) => describeElement(el, index));
-  const rawText = doc.body?.innerText ?? '';
+  const root = doc.querySelector('main, [role="main"], article') ?? doc.body;
+  const rawText = (root as HTMLElement | null)?.innerText ?? root?.textContent ?? '';
   return {
     url: doc.defaultView?.location.href ?? '',
     title: doc.title ?? '',

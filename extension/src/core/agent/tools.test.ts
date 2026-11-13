@@ -41,8 +41,11 @@ describe('parseCall', () => {
     });
   });
 
-  it('maps extract and snapshot onto a plain observation', () => {
-    expect(parseCall('extract', { goal: 'prices' })).toEqual({ ok: true, call: { kind: 'observe' } });
+  it('maps extract onto a real page action and snapshot onto observation', () => {
+    expect(parseCall('extract', { goal: 'prices' })).toEqual({
+      ok: true,
+      call: { kind: 'action', action: { type: 'extract', goal: 'prices' } },
+    });
     expect(parseCall('snapshot', {})).toEqual({ ok: true, call: { kind: 'observe' } });
   });
 

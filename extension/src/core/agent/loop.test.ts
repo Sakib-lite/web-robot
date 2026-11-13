@@ -152,6 +152,34 @@ describe('runTask', () => {
     expect(result.reason).toContain('loop detected');
   });
 
+  it('detects url ping-pong with swapped query parameter order', async () => {
+    const urls = ['https://x.dev/repo?tab=repositories&page=2', 'https://x.dev/repo?page=2&tab=repositories'];
+    let i = 0;
+    const chat = async () => reply('', [toolCall('goto', { url: urls[i++ % urls.length] })]);
+    const driver = fakeDriver({ act: async (action) => ({ ok: true, detail: `went ${(action as { url: string }).url}` }) });
+    const result = await runTask('list page 2', deps({ driver, chat }));
+
+    expect(result.status).toBe('failed');
+    expect(result.reason).toContain('loop detected');
+  });
+
+  it('accumulates extract results into the model context', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('extract', { goal: 'repo names' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'collected' })]));
+    const driver = fakeDriver({
+      act: async (action) => (action.type === 'extract' ? { ok: true, detail: 'web-robot\nresume-server\nstopwatch' } : { ok: true, detail: 'ok' }),
+    });
+    const result = await runTask('list repos', deps({ driver, chat }));
+
+    expect(result.status).toBe('done');
+    expect(result.steps[0]!.detail).toBe('33 chars extracted');
+    const context = (chat.mock.calls[1]![0] as import('../llm/chatClient').ChatMessage[]).map((m) => m.content ?? '').join('\n');
+    expect(context).toContain('EXTRACTED CONTENT:');
+    expect(context).toContain('web-robot\nresume-server\nstopwatch');
+  });
+
   it('records invalid tool arguments as a failed step and continues', async () => {
     const chat = vi
       .fn()

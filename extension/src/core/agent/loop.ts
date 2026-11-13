@@ -40,9 +40,22 @@ export function isDangerous(action: Action, snapshot: Snapshot | null): string |
   return null;
 }
 
+function normalizeUrlForCompare(raw: string): string {
+  try {
+    const url = new URL(raw);
+    url.hash = '';
+    const params = [...url.searchParams.entries()].sort().map(([k, v]) => `${k}=${v}`);
+    return `${url.origin}${url.pathname.replace(/\/$/, '')}${params.length ? `?${params.join('&')}` : ''}`;
+  } catch {
+    return raw;
+  }
+}
+
 function actionKey(action: Action, snapshot: Snapshot | null): string {
+  const actionPart =
+    action.type === 'goto' ? JSON.stringify({ type: 'goto', url: normalizeUrlForCompare(action.url) }) : JSON.stringify(action);
   const state = snapshot ? `${snapshot.url}|${snapshot.title}|${snapshot.elements.length}|${snapshot.text.slice(0, 200)}` : 'none';
-  return `${JSON.stringify(action)}|${state}`;
+  return `${actionPart}|${state}`;
 }
 
 function describeAction(action: Action): string {
@@ -67,6 +80,8 @@ function describeAction(action: Action): string {
       return `scroll ${action.direction}${action.amount ? ` ${action.amount}` : ''}`;
     case 'wait':
       return `wait ${action.ms}ms`;
+    case 'extract':
+      return `extract "${action.goal.slice(0, 40)}"`;
   }
 }
 
@@ -75,6 +90,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   const steps: StepRecord[] = [];
   const stepLines: string[] = [];
   const userAnswers: string[] = [];
+  const extracts: Array<{ goal: string; text: string }> = [];
   const repeatCounts = new Map<string, number>();
   let notes: string[] = [];
   let noToolStrikes = 0;
@@ -102,7 +118,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
 
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt() },
-      { role: 'user', content: taskContext(task, stepLines, userAnswers) },
+      { role: 'user', content: taskContext(task, stepLines, userAnswers, extracts) },
       ...notes.map((content) => ({ role: 'system' as const, content })),
       { role: 'user', content: observationBlock(tabs, snapshot) },
     ];
@@ -177,7 +193,13 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     }
 
     const result = await deps.driver.act(action);
-    record(result.ok, describeAction(action), result.detail);
+    if (result.ok && action.type === 'extract') {
+      const text = result.detail;
+      extracts.push({ goal: action.goal, text });
+      record(true, describeAction(action), `${text.length} chars extracted`);
+    } else {
+      record(result.ok, describeAction(action), result.detail);
+    }
     index++;
   }
 }

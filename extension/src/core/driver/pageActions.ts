@@ -16,9 +16,30 @@ export async function runPageAction(action: Action, resolve: ElementRef, win: Wi
       return scroll(win, action.direction, action.amount);
     case 'wait':
       return sleep(action.ms);
+    case 'extract':
+      return extractContent();
     default:
       return { ok: false, detail: `action ${action.type} is handled by the browser, not the page` };
   }
+}
+
+export function mainContentText(doc: Document, limit = 6000): string {
+  const root = doc.querySelector('main, [role="main"], article') ?? doc.body;
+  return (root?.textContent ?? '')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\s+\n/g, '\n')
+    .replace(/\n{2,}/g, '\n')
+    .trim()
+    .slice(0, limit);
+}
+
+function extractContent(): Promise<ActionResult> {
+  const text = mainContentText(document);
+  return Promise.resolve(
+    text
+      ? { ok: true, detail: text }
+      : { ok: false, detail: 'no readable text found on this page' },
+  );
 }
 
 function requireElement(resolve: ElementRef, ref: string): { ok: true; el: Element } | { ok: false; detail: string } {
