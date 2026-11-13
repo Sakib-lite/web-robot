@@ -79,7 +79,8 @@ export async function runClaimedTask(
   const info = await plane.describe().catch(() => null);
   const resume = await buildResumePreamble(taskId, plane);
   if (resume) preamble = preamble ? `${preamble}\n\n${resume}` : resume;
-  await runRemoteTask(taskId, taskText, backendUrl, {
+  const activeText = lastMessage && lastMessage !== taskText ? lastMessage : taskText;
+  await runRemoteTask(taskId, activeText, backendUrl, {
     provider,
     makeDriver,
     ...(maxSteps ? { maxSteps } : {}),
