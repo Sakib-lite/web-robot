@@ -1,5 +1,4 @@
-<img width="1512" height="982" alt="screen_recording" src="https://github.com/user-attachments/assets/f65e53b2-ac3e-45c4-80bb-dd1270e7f144" />
-# web-robot
+<img width="1200" height="779" alt="screen_recording_2_small" src="https://github.com/user-attachments/assets/c272e495-dab4-4c46-80cc-19de6a7be592" /># web-robot
 
 Autonomous browser agent for Chrome. Tell it a task in plain language — it opens pages, clicks, fills forms, extracts information, and reports back, deciding each next step on its own. Works in your real Chrome with your existing logins. Any OpenAI-compatible LLM can drive it.
 
