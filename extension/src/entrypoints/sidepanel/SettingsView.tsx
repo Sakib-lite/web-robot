@@ -1,21 +1,21 @@
 import { useEffect, useState } from 'react';
 import { chatCompletion } from '@/core/llm/chatClient';
-import { allProducts, type ProductId } from '@/core/llm/products';
+import { allProducts, type Effort, type ProductId } from '@/core/llm/products';
 import type { LlmProvider, ProductStore, StoredProductConfig } from '@/core/llm/providers';
 
 interface CardState {
   apiKey: string;
   model: string;
-  thinking: 'enabled' | 'disabled';
+  thinking: Effort;
   reasoningEffort: '' | 'low' | 'medium' | 'high';
 }
 
 type TestState = { productId: ProductId; ok: boolean; message: string } | null;
 
 const EMPTY: Record<ProductId, CardState> = {
-  glm: { apiKey: '', model: '', thinking: 'disabled', reasoningEffort: '' },
-  openai: { apiKey: '', model: '', thinking: 'disabled', reasoningEffort: '' },
-  generic: { apiKey: '', model: '', thinking: 'disabled', reasoningEffort: '' },
+  glm: { apiKey: '', model: '', thinking: 'off', reasoningEffort: '' },
+  openai: { apiKey: '', model: '', thinking: 'off', reasoningEffort: '' },
+  generic: { apiKey: '', model: '', thinking: 'off', reasoningEffort: '' },
 };
 
 function cardFor(productId: ProductId, config: StoredProductConfig | undefined): CardState {
@@ -23,7 +23,7 @@ function cardFor(productId: ProductId, config: StoredProductConfig | undefined):
   return {
     apiKey: config.apiKey,
     model: config.model,
-    thinking: config.thinking ?? 'disabled',
+    thinking: config.thinking ?? 'off',
     reasoningEffort: config.reasoningEffort ?? '',
   };
 }
@@ -130,14 +130,26 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
             </label>
             <label>
               model
-              <input value={card.model} onChange={(e) => setCards({ ...cards, [product.id]: { ...card, model: e.target.value } })} placeholder={product.defaults.model} />
+              <input
+                list={`${product.id}-models`}
+                value={card.model}
+                onChange={(e) => setCards({ ...cards, [product.id]: { ...card, model: e.target.value } })}
+                placeholder={product.defaults.model}
+              />
+              <datalist id={`${product.id}-models`}>
+                {(product.models ?? [product.defaults.model]).map((model) => (
+                  <option key={model} value={model} />
+                ))}
+              </datalist>
             </label>
             {product.id === 'glm' && (
               <label>
-                thinking
-                <select value={card.thinking} onChange={(e) => setCards({ ...cards, [product.id]: { ...card, thinking: e.target.value as 'enabled' | 'disabled' } })}>
-                  <option value="disabled">off (faster)</option>
-                  <option value="enabled">on (deep reasoning)</option>
+                effort
+                <select value={card.thinking} onChange={(e) => setCards({ ...cards, [product.id]: { ...card, thinking: e.target.value as Effort } })}>
+                  <option value="off">off (fastest, no reasoning)</option>
+                  <option value="low">low</option>
+                  <option value="high">high</option>
+                  <option value="max">max (deepest reasoning)</option>
                 </select>
               </label>
             )}

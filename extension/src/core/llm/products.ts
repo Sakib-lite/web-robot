@@ -2,6 +2,7 @@ import { effectiveModel } from './modelSlots';
 import type { LlmProvider } from './providers';
 
 export type ProductId = 'glm' | 'openai' | 'generic';
+export type Effort = 'off' | 'low' | 'high' | 'max';
 
 export interface WirePayload {
   model: string;
@@ -17,13 +18,14 @@ export interface ProductBuildInput {
   tools?: unknown[];
   model?: string;
   maxTokens?: number;
-  thinking?: boolean;
 }
 
 export interface LlmProduct {
   id: ProductId;
   label: string;
   defaults: { baseUrl: string; model: string };
+  models?: string[];
+  efforts?: Effort[];
   buildPayload: (provider: LlmProvider, req: ProductBuildInput) => WirePayload;
 }
 
@@ -34,16 +36,47 @@ function resolveModel(provider: LlmProvider, requested: string | undefined): str
   return effectiveModel(requested, provider) ?? provider.model;
 }
 
+// verified against the coding endpoint: reasoning_effort=off is rejected,
+// low/high/max are honored, thinking.disabled suppresses reasoning entirely
+function glmEffortWire(provider: LlmProvider): Pick<WirePayload, 'thinking' | 'reasoning_effort'> {
+  switch (provider.thinking ?? 'off') {
+    case 'off':
+      return { thinking: { type: 'disabled' } };
+    case 'low':
+      return { thinking: { type: 'enabled' }, reasoning_effort: 'low' };
+    case 'high':
+      return { thinking: { type: 'enabled' }, reasoning_effort: 'high' };
+    case 'max':
+      return { thinking: { type: 'enabled' }, reasoning_effort: 'max' };
+  }
+}
+
 export const glmProduct: LlmProduct = {
   id: 'glm',
   label: 'GLM (Z.ai / BigModel)',
   defaults: { baseUrl: 'https://api.z.ai/api/coding/paas/v4', model: 'glm-5.3' },
+  models: [
+    'glm-5.3',
+    'glm-5.3-flash',
+    'glm-5.2',
+    'glm-5.1',
+    'glm-5.1-highspeed',
+    'glm-5',
+    'glm-5-turbo',
+    'glm-4.7',
+    'glm-4.7-flashx',
+    'glm-4.7-flash',
+    'glm-4.6',
+    'glm-4.5-air',
+    'glm-4.5',
+  ],
+  efforts: ['off', 'low', 'high', 'max'],
   buildPayload: (provider, req) => ({
     model: resolveModel(provider, req.model),
     messages: req.messages,
     ...(req.tools?.length ? { tools: req.tools } : {}),
     max_tokens: req.maxTokens ?? GLM_MAX_TOKENS,
-    thinking: { type: (req.thinking ?? provider.thinking === 'enabled') ? 'enabled' : 'disabled' },
+    ...glmEffortWire(provider),
   }),
 };
 
@@ -51,6 +84,7 @@ export const openaiProduct: LlmProduct = {
   id: 'openai',
   label: 'OpenAI',
   defaults: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  models: ['gpt-4o-mini', 'gpt-4o', 'o4-mini', 'gpt-4.1-mini', 'gpt-4.1'],
   buildPayload: (provider, req) => ({
     model: resolveModel(provider, req.model),
     messages: req.messages,

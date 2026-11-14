@@ -14,15 +14,28 @@ describe('product registry', () => {
 });
 
 describe('glm strategy', () => {
-  it('sends thinking state and the full token budget', () => {
-    const payload = getProduct('glm').buildPayload(provider({ thinking: 'enabled' }), { messages: [], maxTokens: 8000 });
-    expect(payload).toMatchObject({ model: 'glm-5.3', max_tokens: 8000, thinking: { type: 'enabled' } });
+  it('maps effort levels onto thinking + reasoning_effort wire params', () => {
+    expect(getProduct('glm').buildPayload(provider({ thinking: 'off' }), { messages: [] }).thinking).toEqual({ type: 'disabled' });
+    const low = getProduct('glm').buildPayload(provider({ thinking: 'low' }), { messages: [] });
+    expect(low.thinking).toEqual({ type: 'enabled' });
+    expect(low.reasoning_effort).toBe('low');
+    const max = getProduct('glm').buildPayload(provider({ thinking: 'max' }), { messages: [] });
+    expect(max.thinking).toEqual({ type: 'enabled' });
+    expect(max.reasoning_effort).toBe('max');
   });
 
-  it('defaults thinking to disabled', () => {
-    const payload = getProduct('glm').buildPayload(provider(), { messages: [] });
-    expect(payload.thinking).toEqual({ type: 'disabled' });
-    expect(payload.max_tokens).toBe(32768);
+  it('sends the full token budget for glm', () => {
+    const payload = getProduct('glm').buildPayload(provider(), { messages: [], maxTokens: 8000 });
+    expect(payload.max_tokens).toBe(8000);
+    expect(getProduct('glm').buildPayload(provider(), { messages: [] }).max_tokens).toBe(32768);
+  });
+
+  it('normalizes legacy enabled/disabled values through the store', async () => {
+    const { createProductStore } = await import('./providers');
+    const { memoryArea } = await import('../storage/area');
+    const store = createProductStore(memoryArea());
+    await store.save({ productId: 'glm', baseUrl: 'https://api.z.ai/api/coding/paas/v4', apiKey: 'sk', model: 'glm-5.3', thinking: 'disabled' as never });
+    expect((await store.get('glm'))?.thinking).toBe('off');
   });
 
   it('omits tools when none are given', () => {

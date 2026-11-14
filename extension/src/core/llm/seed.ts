@@ -14,6 +14,6 @@ export const ENV_SEED: LlmProvider | null =
         baseUrl,
         apiKey,
         model,
-        thinking: 'disabled',
+        thinking: 'off',
       }
     : null;

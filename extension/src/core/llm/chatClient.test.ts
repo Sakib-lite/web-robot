@@ -32,10 +32,10 @@ describe('chatCompletion wire behavior per product', () => {
       captured = init;
       return jsonResponse(200, okBody());
     };
-    const res = await chatCompletion(provider({ thinking: 'enabled' }), { messages: [{ role: 'user', content: 'hi' }], tools: [tool], maxTokens: 8000 }, fetchFn);
+    const res = await chatCompletion(provider({ thinking: 'max' }), { messages: [{ role: 'user', content: 'hi' }], tools: [tool], maxTokens: 8000 }, fetchFn);
 
     const payload = JSON.parse(String(captured!.body));
-    expect(payload).toMatchObject({ model: 'glm-5.3', max_tokens: 8000, thinking: { type: 'enabled' } });
+    expect(payload).toMatchObject({ model: 'glm-5.3', max_tokens: 8000, thinking: { type: 'enabled' }, reasoning_effort: 'max' });
     expect(payload.tools[0].function.name).toBe('click');
     expect(res.content).toBe('ok');
     expect(res.toolCalls).toEqual([{ id: 'c1', name: 'click', args: { ref: 'e3' } }]);

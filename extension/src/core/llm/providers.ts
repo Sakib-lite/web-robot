@@ -1,13 +1,13 @@
 import type { StorageArea } from '../storage/area';
 import { ENV_SEED } from './seed';
-import type { ProductId } from './products';
+import type { Effort, ProductId } from './products';
 
 export interface LlmProvider {
   productId: ProductId;
   baseUrl: string;
   apiKey: string;
   model: string;
-  thinking?: 'enabled' | 'disabled';
+  thinking?: Effort;
   reasoningEffort?: 'low' | 'medium' | 'high';
 }
 
@@ -34,6 +34,12 @@ interface StoredShape {
 const KEY = 'llmProductConfigs';
 const LEGACY_KEY = 'llmProviders';
 
+function normalizeEffort(value: string | undefined): Effort | undefined {
+  if (!value) return undefined;
+  if (value === 'off' || value === 'low' || value === 'high' || value === 'max') return value;
+  return value === 'enabled' ? 'high' : 'off';
+}
+
 function validate(input: ProductConfigInput): LlmProvider {
   if (!input.baseUrl?.trim()) throw new Error('base url is required');
   if (!input.model?.trim()) throw new Error('model is required');
@@ -42,7 +48,7 @@ function validate(input: ProductConfigInput): LlmProvider {
     baseUrl: input.baseUrl.trim().replace(/\/+$/, ''),
     apiKey: input.apiKey?.trim() ?? '',
     model: input.model.trim(),
-    ...(input.thinking ? { thinking: input.thinking } : {}),
+    ...(normalizeEffort(input.thinking) ? { thinking: normalizeEffort(input.thinking) } : {}),
     ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
   };
 }

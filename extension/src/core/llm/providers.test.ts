@@ -9,7 +9,7 @@ import {
 } from './providers';
 
 function glmConfig(over: Partial<ProductConfigInput> = {}): ProductConfigInput {
-  return { productId: 'glm', baseUrl: 'https://api.z.ai/api/coding/paas/v4', apiKey: 'sk-1', model: 'glm-5.3', thinking: 'disabled', ...over };
+  return { productId: 'glm', baseUrl: 'https://api.z.ai/api/coding/paas/v4', apiKey: 'sk-1', model: 'glm-5.3', thinking: 'off', ...over };
 }
 
 function openaiConfig(over: Partial<ProductConfigInput> = {}): ProductConfigInput {
@@ -47,9 +47,9 @@ describe('product store', () => {
 
   it('carries the product knobs (thinking, reasoning effort) through save', async () => {
     const store = createProductStore(memoryArea());
-    await store.save(glmConfig({ thinking: 'enabled' }));
+    await store.save(glmConfig({ thinking: 'max' }));
     await store.save(openaiConfig({ reasoningEffort: 'medium' }));
-    expect((await store.get('glm'))?.thinking).toBe('enabled');
+    expect((await store.get('glm'))?.thinking).toBe('max');
     expect((await store.get('openai'))?.reasoningEffort).toBe('medium');
   });
 
@@ -71,7 +71,7 @@ describe('product store', () => {
 
   it('seeds the glm config from env once and keeps user edits afterwards', async () => {
     const store = createProductStore(memoryArea());
-    const envSeed: LlmProvider = { productId: 'glm', baseUrl: 'https://api.z.ai/api/coding/paas/v4', apiKey: 'sk-env', model: 'glm-5.3', thinking: 'disabled' };
+    const envSeed: LlmProvider = { productId: 'glm', baseUrl: 'https://api.z.ai/api/coding/paas/v4', apiKey: 'sk-env', model: 'glm-5.3', thinking: 'off' };
 
     await seedFromEnv(store, envSeed);
     expect((await store.get('glm'))?.apiKey).toBe('sk-env');
