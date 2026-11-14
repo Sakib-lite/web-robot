@@ -4,6 +4,7 @@ import { createExtensionDriver } from '@/core/driver/extensionDriver';
 import { chatCompletion, type ChatMessage, type ChatResponse, type ToolDef } from '@/core/llm/chatClient';
 import { resolveActiveProvider, type ProviderStore } from '@/core/llm/providers';
 import { DEFAULT_SLOT_MODELS } from '@/core/llm/modelSlots';
+import ResultView from './ResultView';
 
 export default function TaskRunner({ store }: { store: ProviderStore }) {
   const [task, setTask] = useState('');
@@ -89,13 +90,7 @@ export default function TaskRunner({ store }: { store: ProviderStore }) {
         </ol>
       )}
 
-      {result && (
-        <div className={result.status === 'done' ? 'note ok' : 'note err'}>
-          <strong>{result.status}</strong>
-          {result.summary ? ` — ${result.summary}` : result.reason ? ` — ${result.reason}` : ''}
-          {result.data != null && <pre className="data">{JSON.stringify(result.data, null, 2)}</pre>}
-        </div>
-      )}
+      {result && <ResultView result={result} />}
     </div>
   );
 }

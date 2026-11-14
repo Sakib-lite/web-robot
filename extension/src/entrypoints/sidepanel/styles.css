@@ -148,6 +148,67 @@ button.danger {
   font-size: 11px;
 }
 
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.result > strong {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 11px;
+}
+
+.result-summary p,
+.result-data p {
+  margin: 0;
+}
+
+.result-summary h3,
+.result-summary h4,
+.result-summary h5 {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+.result-summary ul,
+.result-summary ol,
+.result-data ul,
+.result-data ol {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.result-summary a {
+  color: inherit;
+}
+
+.result-summary code {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  padding: 0 3px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.result-data table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+
+.result-data th,
+.result-data td {
+  border: 1px solid var(--line);
+  padding: 3px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.result-data th {
+  background: color-mix(in srgb, currentColor 5%, transparent);
+}
+
 .settings {
   display: flex;
   flex-direction: column;

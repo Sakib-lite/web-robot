@@ -28,7 +28,7 @@ export const toolSpecs = {
   wait: { description: 'Wait before the next observation, at most 5000 ms.', schema: z.object({ ms: z.number().int().min(0).max(5000) }) },
   snapshot: { description: 'Re-read the current page observation (tabs + elements).', schema: z.object({}) },
   ask_user: { description: 'Ask the user a question when blocked, or to confirm an irreversible action.', schema: z.object({ question: z.string() }) },
-  done: { description: 'Finish the task with a summary and optional extracted data.', schema: z.object({ summary: z.string(), data: z.unknown().optional() }) },
+  done: { description: 'Finish the task with a summary written in markdown (use - bullets for lists, 1. numbering for ordered items, **bold** for key facts) and optional extracted data.', schema: z.object({ summary: z.string(), data: z.unknown().optional() }) },
   fail: { description: 'Give up on the task and explain why.', schema: z.object({ reason: z.string() }) },
 } satisfies Record<string, ToolSpec>;
 

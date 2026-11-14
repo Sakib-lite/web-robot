@@ -19,6 +19,7 @@ describe('systemPrompt', () => {
     expect(prompt).toContain('untrusted');
     expect(prompt).toContain('ask_user');
     expect(prompt).toContain('pagination');
+    expect(prompt).toContain('markdown');
   });
 });
 
