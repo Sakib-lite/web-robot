@@ -143,16 +143,60 @@ describe('runTask', () => {
     expect(result.steps).toHaveLength(5);
   });
 
-  it('fails on loop detection when the same action repeats on an unchanged page', async () => {
-    const chat = async () => reply('', [toolCall('click', { ref: 'e1' })]);
-    const driver = fakeDriver({ act: async () => ({ ok: true, detail: 'clicked' }) });
-    const result = await runTask('click it', deps({ driver, chat }));
+  it('blocks repeated no-op actions but keeps the task alive', async () => {
+    const act = vi.fn(async () => ({ ok: true, detail: 'clicked' }));
+    const driver = fakeDriver({ act });
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('click', { ref: 'e1' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('click', { ref: 'e1' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('click', { ref: 'e1' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('click', { ref: 'e1' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('click', { ref: 'e1' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('click', { ref: 'e1' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'moved on after NJIT was a dead end' })]));
+    const result = await runTask('list the universities', deps({ driver, chat }));
 
-    expect(result.status).toBe('failed');
-    expect(result.reason).toContain('loop detected');
+    expect(result.status).toBe('done');
+    expect(result.summary).toContain('moved on');
+    // executed 4 times (hits 1-4), blocked from the 5th identical attempt on
+    expect(act).toHaveBeenCalledTimes(4);
+    const blockedSteps = result.steps.filter((s) => !s.ok && s.detail.includes('blocked'));
+    expect(blockedSteps.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('detects url ping-pong with swapped query parameter order', async () => {
+  it('lets the agent switch targets after a blocked sub-goal', async () => {
+    let state = 0;
+    const driver = fakeDriver({
+      act: async (action) => {
+        const gotoAction = action as { url?: string };
+        if (gotoAction.url?.includes('mit.edu')) state = 1;
+        return { ok: true, detail: `went ${gotoAction.url ?? 'x'}` };
+      },
+      snapshot: async () =>
+        snapshot({
+          url: state === 1 ? 'https://web.mit.edu/admissions' : 'https://www.njit.edu/admissions',
+          title: state === 1 ? 'MIT' : 'NJIT',
+        }),
+    });
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('click', { ref: 'e1' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('click', { ref: 'e1' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('click', { ref: 'e1' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('click', { ref: 'e1' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('click', { ref: 'e1' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('click', { ref: 'e1' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('goto', { url: 'https://web.mit.edu/admissions' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('extract', { goal: 'english req' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'NJIT failed, MIT listed' })]));
+    const result = await runTask('list both universities', deps({ driver, chat }));
+
+    expect(result.status).toBe('done');
+    expect(result.summary).toContain('MIT');
+  });
+
+  it('fails as stalled only when every chosen action is blocked', async () => {
     const urls = ['https://x.dev/repo?tab=repositories&page=2', 'https://x.dev/repo?page=2&tab=repositories'];
     let i = 0;
     const chat = async () => reply('', [toolCall('goto', { url: urls[i++ % urls.length] })]);
@@ -160,7 +204,7 @@ describe('runTask', () => {
     const result = await runTask('list page 2', deps({ driver, chat }));
 
     expect(result.status).toBe('failed');
-    expect(result.reason).toContain('loop detected');
+    expect(result.reason).toContain('stalled');
   });
 
   it('does not count a click as a repeat when the page state actually changed', async () => {

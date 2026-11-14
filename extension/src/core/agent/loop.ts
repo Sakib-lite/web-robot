@@ -35,9 +35,10 @@ export interface LoopDeps {
   telemetry?: LoopTelemetry;
 }
 
-const DEFAULT_MAX_STEPS = 40;
+const DEFAULT_MAX_STEPS = 60;
 const LOOP_NUDGE_AT = 3;
-const LOOP_FAIL_AT = 5;
+const LOOP_BLOCK_AT = 5;
+const STALL_LIMIT = 6;
 
 const DANGER_PATTERN = /pay|purchase|order|buy|checkout|delete|remove|submit|post|send|confirm/i;
 
@@ -110,6 +111,8 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   const userAnswers: string[] = [];
   const extracts: Array<{ goal: string; text: string }> = [];
   const repeatCounts = new Map<string, number>();
+  const blockedKeys = new Set<string>();
+  let consecutiveBlocked = 0;
   let notes: string[] = [];
   let noToolStrikes = 0;
   let index = 0;
@@ -219,13 +222,28 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     }
 
     const key = actionKey(action, snapshot);
+    if (blockedKeys.has(key)) {
+      consecutiveBlocked++;
+      record(false, describeAction(action), 'blocked: same action already repeated with no page change');
+      notes.push('That exact action is blocked on this unchanged page (it did nothing last time). Pick a different element, scroll, extract, or continue with the rest of the task elsewhere.');
+      index++;
+      if (consecutiveBlocked >= STALL_LIMIT) {
+        return { status: 'failed', reason: `stalled: ${consecutiveBlocked} consecutive chosen actions are all blocked no-ops`, steps };
+      }
+      continue;
+    }
+    consecutiveBlocked = 0;
     const seen = (repeatCounts.get(key) ?? 0) + 1;
     repeatCounts.set(key, seen);
     if (seen === LOOP_NUDGE_AT) {
-      notes.push('You repeated the same action without the page changing. The element may be a no-op - pick a different element, scroll, or use extract to read more of the page.');
+      notes.push('The last actions changed nothing on the page. The element may be a no-op - pick a different element, scroll, or use extract to read more of the page.');
     }
-    if (seen >= LOOP_FAIL_AT) {
-      return { status: 'failed', reason: `loop detected: ${describeAction(action)} repeated ${seen} times without page change`, steps };
+    if (seen >= LOOP_BLOCK_AT) {
+      blockedKeys.add(key);
+      record(false, describeAction(action), `blocked after ${seen} identical attempts with no page change`);
+      notes.push('Repeated no-op action is now blocked. This sub-target is a dead end - move on to the next candidate or a different approach instead of retrying.');
+      index++;
+      continue;
     }
 
     const actionStarted = Date.now();
