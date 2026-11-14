@@ -5,6 +5,7 @@
     "dev": "pnpm --filter @web-robot/extension dev",
     "build": "pnpm --filter @web-robot/extension build",
     "test": "pnpm --filter @web-robot/extension test",
-    "typecheck": "pnpm --filter @web-robot/extension typecheck"
+    "typecheck": "pnpm --filter @web-robot/extension typecheck",
+    "reload": "node scripts/reload.mjs"
   }
 }
