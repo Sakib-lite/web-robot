@@ -126,6 +126,17 @@ describe('handleMessage', () => {
     expect(bad.ok).toBe(false);
   });
 
+  it('skips navigation when the active tab is already at the url', async () => {
+    const update = vi.fn(async () => ({}));
+    const tabs = fakeTabs({
+      query: async () => [{ id: 7, url: 'https://same.dev/page', title: 'Same', active: true }],
+      update,
+    });
+    const res = await handleMessage({ type: 'RUN_ACTION', action: { type: 'goto', url: 'https://same.dev/page' } }, { tabs, scripting: fakeScripting() });
+    expect(res).toEqual({ ok: true, detail: 'already at https://same.dev/page' });
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it('opens, switches and closes tabs without needing an active tab', async () => {
     const create = vi.fn(async () => ({ id: 9 }));
     const update = vi.fn(async () => ({}));

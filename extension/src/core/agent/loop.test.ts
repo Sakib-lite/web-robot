@@ -307,6 +307,33 @@ describe('runTask', () => {
     expect(result.reason).toContain('llm error');
   });
 
+  it('auto-notes extract digests into the working memory', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('extract', { goal: 'PTE score' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'x' })]));
+    const driver = fakeDriver({
+      act: async (action) => (action.type === 'extract' ? { ok: true, detail: 'PTE Academic minimum 55 accepted for CS.' } : { ok: true, detail: 'ok' }),
+    });
+    await runTask('t', deps({ driver, chat }));
+    const context = (chat.mock.calls[1]![0] as import('../llm/chatClient').ChatMessage[]).map((m) => m.content ?? '').join('\n');
+    expect(context).toContain('YOUR NOTES');
+    expect(context).toContain('auto · PTE score → PTE Academic minimum 55 accepted');
+  });
+
+  it('nudges when a click fails on a stale ref', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('click', { ref: 'e9' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'x' })]));
+    const driver = fakeDriver({
+      act: async () => ({ ok: false, detail: 'ref e9 not found on the page - take a new snapshot' }),
+    });
+    await runTask('t', deps({ driver, chat }));
+    const secondMessages = chat.mock.calls[1]![0] as import('../llm/chatClient').ChatMessage[];
+    expect(secondMessages.some((m) => m.role === 'system' && m.content?.includes('refs from the LATEST observation'))).toBe(true);
+  });
+
   it('keeps note calls as durable working memory visible to later turns', async () => {
     const chat = vi
       .fn()

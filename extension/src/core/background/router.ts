@@ -43,13 +43,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function runBrowserAction(tabId: number | undefined, action: Action, tabsApi: TabsApi): Promise<PanelResponse> {
+async function runBrowserAction(tab: chrome.tabs.Tab | undefined, action: Action, tabsApi: TabsApi): Promise<PanelResponse> {
   switch (action.type) {
     case 'goto': {
-      if (!tabId) return { ok: false, error: 'no active tab to navigate' };
+      if (!tab?.id) return { ok: false, error: 'no active tab to navigate' };
       const url = navigableUrl(action.url);
       if (!url) return { ok: false, error: `not a navigable url: ${action.url}` };
-      await tabsApi.update(tabId, { url });
+      // re-navigating the tab to where it already is is a wasted load + sleep;
+      // agents double-fire goto right after opening a tab
+      if (tab.url === url) return { ok: true, detail: `already at ${url}` };
+      await tabsApi.update(tab.id, { url });
       await sleep(600);
       return { ok: true, detail: `navigated to ${url}` };
     }
@@ -134,7 +137,7 @@ export async function handleMessage(message: PanelRequest, apis: BrowserApis): P
     if (!tab?.id) return { ok: false, error: 'no active tab' };
 
     if (action.type === 'goto') {
-      return runBrowserAction(tab.id, action, tabsApi);
+      return runBrowserAction(tab, action, tabsApi);
     }
 
     if (!tab.url?.startsWith('http')) return { ok: false, error: `cannot act on this page (${tab.url ?? 'unknown url'})` };
