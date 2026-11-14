@@ -5,6 +5,7 @@ import type { Action } from '../driver/types';
 export type AgentCall =
   | { kind: 'action'; action: Action }
   | { kind: 'observe' }
+  | { kind: 'note'; text: string }
   | { kind: 'ask_user'; question: string }
   | { kind: 'done'; summary: string; data?: unknown }
   | { kind: 'fail'; reason: string };
@@ -26,6 +27,7 @@ export const toolSpecs = {
   scroll: { description: 'Scroll the page up or down.', schema: z.object({ direction: z.enum(['up', 'down']), amount: z.number().int().optional() }) },
   extract: { description: 'Read targeted information from the page. Returns the main content text; use it after each page of a listing task.', schema: z.object({ goal: z.string() }) },
   wait: { description: 'Wait before the next observation, at most 5000 ms.', schema: z.object({ ms: z.number().int().min(0).max(5000) }) },
+  note: { description: 'Record a durable finding or plan update (e.g. "UIC: PTE 54 verified at mscs.uic.edu"). Notes stay visible for the rest of the task - use them as your working memory.', schema: z.object({ text: z.string() }) },
   snapshot: { description: 'Re-read the current page observation (tabs + elements).', schema: z.object({}) },
   ask_user: { description: 'Ask the user a question when blocked, or to confirm an irreversible action.', schema: z.object({ question: z.string() }) },
   done: { description: 'Finish the task with a summary written in markdown (use - bullets for lists, 1. numbering for ordered items, **bold** for key facts) and optional extracted data.', schema: z.object({ summary: z.string(), data: z.unknown().optional() }) },
@@ -84,6 +86,8 @@ export function parseCall(name: string, args: Record<string, unknown>): { ok: tr
       return { ok: true, call: { kind: 'action', action: { type: 'extract', goal: String(a.goal) } } };
     case 'snapshot':
       return { ok: true, call: { kind: 'observe' } };
+    case 'note':
+      return { ok: true, call: { kind: 'note', text: String(a.text) } };
     case 'ask_user':
       return { ok: true, call: { kind: 'ask_user', question: String(a.question) } };
     case 'done':

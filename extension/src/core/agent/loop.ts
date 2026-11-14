@@ -117,6 +117,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
   const stepLines: string[] = [];
   const userAnswers: string[] = [];
   const extracts: Array<{ goal: string; text: string }> = [];
+  const agentNotes: string[] = [];
   const repeatCounts = new Map<string, number>();
   const blockedKeys = new Set<string>();
   let consecutiveBlocked = 0;
@@ -153,11 +154,19 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
 
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt() },
-      { role: 'user', content: taskContext(task, stepLines, userAnswers, extracts) },
+      { role: 'user', content: taskContext(task, stepLines, userAnswers, extracts, agentNotes) },
       ...notes.map((content) => ({ role: 'system' as const, content })),
       { role: 'user', content: observationBlock(tabs, snapshot) },
     ];
     notes = [];
+
+    const remaining = maxSteps - index;
+    if (remaining === 15 || remaining === 5) {
+      messages.push({
+        role: 'system',
+        content: `Only ${remaining} steps left. Consolidate: finish verifying only your most promising remaining targets, then call done with the results you have (partial beats failing).`,
+      });
+    }
 
     let res: ChatResponse;
     const chatStarted = Date.now();
@@ -212,6 +221,12 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     }
     if (agentCall.kind === 'observe') {
       record(true, call.name, 'fresh observation taken');
+      index++;
+      continue;
+    }
+    if (agentCall.kind === 'note') {
+      agentNotes.push(agentCall.text);
+      record(true, 'note', agentCall.text.slice(0, 90));
       index++;
       continue;
     }

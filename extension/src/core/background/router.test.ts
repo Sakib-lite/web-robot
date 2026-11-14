@@ -38,13 +38,17 @@ describe('navigableUrl', () => {
 });
 
 describe('handleMessage', () => {
-  it('lists only http tabs with their active flag', async () => {
+  it('lists only http tabs and stars only the focused window\'s tab', async () => {
     const tabs = fakeTabs({
-      query: async () => [
-        { id: 1, url: 'https://a.dev', title: 'A', active: true },
-        { id: 2, url: 'chrome://settings', title: 'Settings', active: false },
-        { id: 3, url: 'https://b.dev', title: 'B', active: false },
-      ],
+      query: async (queryInfo?: chrome.tabs.QueryInfo) => {
+        const all = [
+          { id: 1, url: 'https://a.dev', title: 'A', active: true },
+          { id: 2, url: 'chrome://settings', title: 'Settings', active: false },
+          { id: 3, url: 'https://b.dev', title: 'B', active: true },
+        ];
+        if (queryInfo?.lastFocusedWindow) return [all[0]];
+        return all;
+      },
     });
     const res = await handleMessage({ type: 'GET_TABS' }, { tabs, scripting: fakeScripting() });
     expect(res).toEqual({
@@ -54,6 +58,23 @@ describe('handleMessage', () => {
         { id: 3, url: 'https://b.dev', title: 'B', active: false },
       ],
     });
+  });
+
+  it('reuses an existing tab when new_tab targets the same url', async () => {
+    const create = vi.fn(async () => ({ id: 9 }));
+    const update = vi.fn(async () => ({}));
+    const tabs = fakeTabs({
+      query: async (queryInfo?: chrome.tabs.QueryInfo) => {
+        if (queryInfo?.lastFocusedWindow) return [];
+        return [{ id: 7, url: 'https://x.dev/page', title: 'X', active: false }];
+      },
+      create,
+      update,
+    });
+    const res = await handleMessage({ type: 'RUN_ACTION', action: { type: 'new_tab', url: 'https://x.dev/page' } }, { tabs, scripting: fakeScripting() });
+    expect(res).toEqual({ ok: true, detail: 'reused existing tab 7 at https://x.dev/page' });
+    expect(create).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith(7, { active: true });
   });
 
   it('returns a snapshot from the active tab', async () => {

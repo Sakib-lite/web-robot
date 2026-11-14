@@ -307,8 +307,40 @@ describe('runTask', () => {
     expect(result.reason).toContain('llm error');
   });
 
-  it('streams steps through onStep', async () => {
-    const onStep = vi.fn();
+  it('keeps note calls as durable working memory visible to later turns', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('note', { text: 'UIC: PTE 54 verified at mscs.uic.edu' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'listed' })]));
+    const result = await runTask('list unis', deps({ chat }));
+
+    expect(result.status).toBe('done');
+    expect(result.steps[0]!.call).toBe('note');
+    const context = (chat.mock.calls[1]![0] as import('../llm/chatClient').ChatMessage[]).map((m) => m.content ?? '').join('\n');
+    expect(context).toContain('YOUR NOTES');
+    expect(context).toContain('UIC: PTE 54 verified at mscs.uic.edu');
+  });
+
+  it('warns the model to wrap up when the step budget runs low', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(reply('', [toolCall('scroll', { direction: 'down' })]))
+      .mockResolvedValueOnce(reply('', [toolCall('done', { summary: 'x' })]));
+    let count = 0;
+    const driver = fakeDriver({
+      snapshot: async () => snapshot({ elements: [{ ref: `e${count}`, tag: 'div', kind: 'other' as const, name: `row ${count}` }] }),
+      act: async () => {
+        count++;
+        return { ok: true, detail: 'ok' };
+      },
+    });
+    await runTask('t', deps({ driver, chat, maxSteps: 16 }));
+
+    const secondMessages = chat.mock.calls[1]![0] as import('../llm/chatClient').ChatMessage[];
+    expect(secondMessages.some((m) => m.role === 'system' && m.content?.includes('Only 15 steps left'))).toBe(true);
+  });
+
+  it('streams steps through onStep', async () => {    const onStep = vi.fn();
     const chat = vi
       .fn()
       .mockResolvedValueOnce(reply('', [toolCall('press', { key: 'Enter' })]))
