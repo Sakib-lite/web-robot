@@ -212,7 +212,38 @@ button.danger {
 .settings {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
+}
+
+.product-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.product-card.active {
+  border-color: color-mix(in srgb, var(--ok) 55%, transparent);
+}
+
+.product-card h2 {
+  font-size: 13px;
+  margin: 0 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ok);
+  border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent);
+  border-radius: 999px;
+  padding: 1px 8px;
 }
 
 .settings h2 {

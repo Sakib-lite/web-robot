@@ -5,7 +5,7 @@ import { useProviders } from './useProviders';
 
 export default function App() {
   const [view, setView] = useState<'task' | 'settings'>('task');
-  const { store, providers, refresh } = useProviders();
+  const { store, configs, refresh } = useProviders();
 
   return (
     <main className="app">
@@ -20,7 +20,7 @@ export default function App() {
           </button>
         </nav>
       </header>
-      {view === 'task' ? <TaskRunner store={store} /> : <SettingsView providers={providers} store={store} refresh={refresh} />}
+      {view === 'task' ? <TaskRunner store={store} /> : <SettingsView store={store} configs={configs} refresh={refresh} />}
     </main>
   );
 }

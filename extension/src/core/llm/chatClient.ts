@@ -1,58 +1,9 @@
-import { effectiveModel } from './modelSlots';
-import { isGlmRequest } from './glm';
-import type { LlmProvider } from './providers';
+import { getProduct } from './products';
+import type { ToolDef, ToolCall, ChatMessage, ChatRequest, ChatResponse } from './types';
 
-export interface ToolDef {
-  name: string;
-  description: string;
-  parameters: Record<string, unknown>;
-}
-
-export interface ToolCall {
-  id: string;
-  name: string;
-  args: Record<string, unknown>;
-}
-
-export type ChatRole = 'system' | 'user' | 'assistant' | 'tool';
-
-export interface ChatMessage {
-  role: ChatRole;
-  content?: string;
-  toolCalls?: ToolCall[];
-  toolCallId?: string;
-}
-
-export interface ChatRequest {
-  messages: ChatMessage[];
-  tools?: ToolDef[];
-  model?: string;
-  maxTokens?: number;
-  thinking?: boolean;
-  signal?: AbortSignal;
-}
-
-export interface ChatResponse {
-  content: string;
-  toolCalls: ToolCall[];
-  usage?: { inputTokens?: number; outputTokens?: number };
-}
+export type { ToolDef, ToolCall, ChatMessage, ChatRequest, ChatResponse };
 
 const DEFAULT_MAX_TOKENS = 32768;
-const FOREIGN_MAX_TOKENS = 16384;
-
-export function buildPayload(provider: LlmProvider, req: ChatRequest) {
-  const model = effectiveModel(req.model, provider) ?? provider.model;
-  const glm = isGlmRequest(provider.baseUrl, model);
-  const want = req.maxTokens ?? DEFAULT_MAX_TOKENS;
-  return {
-    model,
-    messages: req.messages.map(toWireMessage),
-    ...(req.tools?.length ? { tools: req.tools.map(toWireTool) } : {}),
-    max_tokens: glm ? want : Math.min(want, FOREIGN_MAX_TOKENS),
-    ...(glm ? { thinking: { type: req.thinking ? 'enabled' : 'disabled' } } : {}),
-  };
-}
 
 function toWireTool(tool: ToolDef) {
   return { type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } };
@@ -99,18 +50,26 @@ function parseToolCall(call: { id?: string; function?: { name?: string; argument
 }
 
 export async function chatCompletion(
-  provider: LlmProvider,
+  provider: import('./providers').LlmProvider,
   req: ChatRequest,
   fetchFn: typeof fetch = fetch,
 ): Promise<ChatResponse> {
-  const endpoint = `${provider.baseUrl}/chat/completions`;
-  const res = await fetchFn(endpoint, {
+  const product = getProduct(provider.productId);
+  const payload = product.buildPayload(provider, {
+    messages: req.messages.map(toWireMessage),
+    ...(req.tools?.length ? { tools: req.tools.map(toWireTool) } : {}),
+    ...(req.model ? { model: req.model } : {}),
+    ...(req.maxTokens ? { maxTokens: req.maxTokens } : { maxTokens: DEFAULT_MAX_TOKENS }),
+    ...(req.thinking !== undefined ? { thinking: req.thinking } : {}),
+  });
+
+  const res = await fetchFn(`${provider.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       ...(provider.apiKey ? { authorization: `Bearer ${provider.apiKey}` } : {}),
     },
-    body: JSON.stringify(buildPayload(provider, req)),
+    body: JSON.stringify(payload),
     signal: req.signal,
   });
 
@@ -130,6 +89,8 @@ export async function chatCompletion(
   return {
     content: choice?.content ?? '',
     toolCalls: choice?.tool_calls?.map(parseToolCall) ?? [],
-    ...(parsed.usage ? { usage: { inputTokens: parsed.usage.prompt_tokens, outputTokens: parsed.usage.completion_tokens } } : {}),
+    ...(parsed.usage
+      ? { usage: { inputTokens: parsed.usage.prompt_tokens, outputTokens: parsed.usage.completion_tokens } }
+      : {}),
   };
 }
