@@ -22,6 +22,7 @@ describe('systemPrompt', () => {
     expect(prompt).toContain('markdown');
     expect(prompt).toContain('scoped failure');
     expect(prompt).toContain('partial result');
+    expect(prompt).toContain('reworded');
   });
 });
 

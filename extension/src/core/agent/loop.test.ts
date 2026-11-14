@@ -207,6 +207,45 @@ describe('runTask', () => {
     expect(result.reason).toContain('stalled');
   });
 
+  it('blocks navigation ping-pong across tool types (goto vs new_tab to the same url)', async () => {
+    const chat = vi
+      .fn()
+      .mockImplementation(async () => {
+        const n = chat.mock.calls.length;
+        const action = n % 2 === 1
+          ? toolCall('goto', { url: 'https://graduate.fsu.edu/english-proficiency' })
+          : toolCall('new_tab', { url: 'https://graduate.fsu.edu/english-proficiency/' });
+        return reply('', [action]);
+      });
+    const act = vi.fn(async (action: Action) => ({ ok: true, detail: `did ${action.type}` }));
+    const driver = fakeDriver({ act });
+    const result = await runTask('open the fsu page', deps({ driver, chat }));
+
+    expect(result.status).toBe('failed');
+    expect(result.reason).toContain('stalled');
+    // executions stop after the block threshold (4 executed), the rest blocked
+    expect(act.mock.calls.filter((c) => (c[0] as Action).type === 'goto' || (c[0] as Action).type === 'new_tab').length).toBe(4);
+  });
+
+  it('blocks extract rewording on an unchanged page state', async () => {
+    const goals = ['PTE minimum', 'quote the PTE paragraph', 'find PTE score sentence', 'PTE score listed after TOEFL', 'what PTE score is required'];
+    let i = 0;
+    const act = vi.fn(async (action: Action) =>
+      action.type === 'extract' ? { ok: true, detail: 'NO TEXT MATCHES YOUR GOAL...' } : { ok: true, detail: 'ok' });
+    const driver = fakeDriver({ act });
+    const chat = vi
+      .fn()
+      .mockImplementation(async () => {
+        const goal = goals[Math.min(i++, goals.length - 1)];
+        return reply('', [toolCall('extract', { goal })]);
+      });
+    const result = await runTask('find the pte score', deps({ driver, chat }));
+
+    expect(result.status).toBe('failed');
+    expect(result.reason).toContain('stalled');
+    expect(act.mock.calls.filter((c) => (c[0] as Action).type === 'extract').length).toBe(4);
+  });
+
   it('does not count a click as a repeat when the page state actually changed', async () => {
     let expanded = false;
     const snap = () =>
