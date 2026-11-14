@@ -5,7 +5,7 @@ export default defineConfig({
   manifest: {
     name: 'web-robot',
     description: 'Autonomous browser agent — tell it a task, it drives your tabs.',
-    permissions: ['sidePanel', 'storage', 'tabs', 'scripting'],
+    permissions: ['sidePanel', 'storage', 'tabs', 'scripting', 'clipboardRead'],
     host_permissions: ['<all_urls>'],
     action: {
       default_title: 'web-robot',
