@@ -3,6 +3,8 @@ import { runTask, type StepRecord, type TaskResult } from '@/core/agent/loop';
 import { createExtensionDriver } from '@/core/driver/extensionDriver';
 import { chatCompletion, type ChatMessage, type ChatResponse, type ToolDef } from '@/core/llm/chatClient';
 import { resolveActiveProvider, type ProductStore } from '@/core/llm/providers';
+import { getBackendUrl } from '@/core/telemetry/settings';
+import { startTelemetry } from '@/core/telemetry/client';
 import ResultView from './ResultView';
 
 export default function TaskRunner({ store }: { store: ProductStore }) {
@@ -12,12 +14,14 @@ export default function TaskRunner({ store }: { store: ProductStore }) {
   const [result, setResult] = useState<TaskResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [usingProvider, setUsingProvider] = useState<string | null>(null);
+  const [traceInfo, setTraceInfo] = useState<{ taskId: string; backendUrl: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   async function run() {
     setError(null);
     setResult(null);
     setSteps([]);
+    setTraceInfo(null);
 
     const provider = await resolveActiveProvider(store);
     if (!provider) {
@@ -35,18 +39,29 @@ export default function TaskRunner({ store }: { store: ProductStore }) {
 
     const askUser = async (question: string) => window.prompt(`web-robot asks:\n${question}`);
 
+    const backendUrl = await getBackendUrl();
+    const telemetry = await startTelemetry(
+      { taskText: task, product: provider.productId, model: provider.model, effort: provider.thinking ?? 'off' },
+      backendUrl,
+    );
+    if (telemetry.taskId) setTraceInfo({ taskId: telemetry.taskId, backendUrl });
+
+    let taskResult: TaskResult | null = null;
     try {
-      const taskResult = await runTask(task, {
+      taskResult = await runTask(task, {
         driver: createExtensionDriver(),
         chat,
         askUser,
         signal: controller.signal,
+        telemetry,
         onStep: (step) => setSteps((prev) => [...prev, step]),
       });
       setResult(taskResult);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      const status = taskResult?.status ?? (controller.signal.aborted ? 'stopped' : 'failed');
+      await telemetry.finish(status, taskResult?.summary, taskResult?.reason, taskResult?.steps.length ?? 0);
       setRunning(false);
       abortRef.current = null;
     }
@@ -87,6 +102,15 @@ export default function TaskRunner({ store }: { store: ProductStore }) {
             </li>
           ))}
         </ol>
+      )}
+
+      {traceInfo && (
+        <div className="muted small">
+          trace: {traceInfo.taskId.slice(0, 8)}… —{' '}
+          <a href={`${traceInfo.backendUrl}/tasks/${traceInfo.taskId}/debug`} target="_blank" rel="noreferrer">
+            open debug json
+          </a>
+        </div>
       )}
 
       {result && <ResultView result={result} />}

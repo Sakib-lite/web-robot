@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { chatCompletion } from '@/core/llm/chatClient';
 import { allProducts, type Effort, type ProductId } from '@/core/llm/products';
 import type { LlmProvider, ProductStore, StoredProductConfig } from '@/core/llm/providers';
+import { DEFAULT_BACKEND_URL, getBackendUrl, saveBackendUrl } from '@/core/telemetry/settings';
 
 interface CardState {
   apiKey: string;
@@ -48,10 +49,14 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
   const [cards, setCards] = useState<Record<ProductId, CardState>>(EMPTY);
   const [testState, setTestState] = useState<TestState>(null);
   const [testing, setTesting] = useState(false);
+  const [backend, setBackend] = useState(DEFAULT_BACKEND_URL);
   const dirty = useRef(new Set<ProductId>());
 
   useEffect(() => {
-    void refresh();
+    void (async () => {
+      setBackend(await getBackendUrl());
+      await refresh();
+    })();
   }, [refresh]);
 
   useEffect(() => {
@@ -237,6 +242,27 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
           </section>
         );
       })}
+
+      <section>
+        <h2>Debug backend</h2>
+        <p className="muted small">Every run is recorded there (steps, DOM, LLM thinking). Start it with `pnpm backend`.</p>
+        <label>
+          backend url
+          <input value={backend} onChange={(e) => setBackend(e.target.value)} placeholder={DEFAULT_BACKEND_URL} />
+        </label>
+        <div className="row">
+          <button
+            className="primary"
+            onClick={async () => {
+              await saveBackendUrl(backend);
+              setTestState({ productId: 'generic', ok: true, message: `backend saved: ${await getBackendUrl()}` });
+            }}
+          >
+            save
+          </button>
+          {testState?.productId === 'generic' && <span className={testState.ok ? 'note ok' : 'note err'}>{testState.message}</span>}
+        </div>
+      </section>
     </div>
   );
 }
