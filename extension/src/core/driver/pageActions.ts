@@ -51,9 +51,22 @@ function requireElement(resolve: ElementRef, ref: string): { ok: true; el: Eleme
 async function click(resolve: ElementRef, ref: string): Promise<ActionResult> {
   const found = requireElement(resolve, ref);
   if (!found.ok) return found;
-  const el = found.el;
+  const el = found.el as HTMLElement;
   el.scrollIntoView({ block: 'center' });
-  (el as HTMLElement).click();
+
+  // full input-event sequence: some widget libraries (jQuery UI, Drupal
+  // accordions) ignore a bare click() but respond to the pointer/mouse chain
+  const rect = el.getBoundingClientRect();
+  const x = rect.left + rect.width / 2;
+  const y = rect.top + rect.height / 2;
+  const pointerInit: PointerEventInit = { bubbles: true, cancelable: true, pointerId: 1, clientX: x, clientY: y, isPrimary: true };
+  const mouseInit: MouseEventInit = { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 };
+  el.dispatchEvent(new PointerEvent('pointerdown', pointerInit));
+  el.dispatchEvent(new MouseEvent('mousedown', mouseInit));
+  el.focus();
+  el.dispatchEvent(new PointerEvent('pointerup', pointerInit));
+  el.dispatchEvent(new MouseEvent('mouseup', mouseInit));
+  el.click();
   return { ok: true, detail: `clicked ${ref}` };
 }
 

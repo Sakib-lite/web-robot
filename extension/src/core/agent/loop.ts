@@ -62,7 +62,17 @@ function normalizeUrlForCompare(raw: string): string {
 function actionKey(action: Action, snapshot: Snapshot | null): string {
   const actionPart =
     action.type === 'goto' ? JSON.stringify({ type: 'goto', url: normalizeUrlForCompare(action.url) }) : JSON.stringify(action);
-  const state = snapshot ? `${snapshot.url}|${snapshot.title}|${snapshot.elements.length}|${snapshot.text.slice(0, 200)}` : 'none';
+  // page-state fingerprint must catch in-place UI changes (accordion expands,
+  // tab switches, text appearing below the fold) or legitimate retries get
+  // counted as loops
+  const state = snapshot
+    ? [
+        snapshot.url,
+        snapshot.title,
+        snapshot.text.slice(0, 1500),
+        snapshot.elements.map((el) => `${el.ref}:${el.expanded ?? ''}:${el.value ?? ''}`).join(','),
+      ].join('|')
+    : 'none';
   return `${actionPart}|${state}`;
 }
 
@@ -212,7 +222,7 @@ export async function runTask(task: string, deps: LoopDeps): Promise<TaskResult>
     const seen = (repeatCounts.get(key) ?? 0) + 1;
     repeatCounts.set(key, seen);
     if (seen === LOOP_NUDGE_AT) {
-      notes.push('You repeated the same action without the page changing. Choose a different approach.');
+      notes.push('You repeated the same action without the page changing. The element may be a no-op - pick a different element, scroll, or use extract to read more of the page.');
     }
     if (seen >= LOOP_FAIL_AT) {
       return { status: 'failed', reason: `loop detected: ${describeAction(action)} repeated ${seen} times without page change`, steps };

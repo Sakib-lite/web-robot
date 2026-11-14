@@ -74,6 +74,18 @@ describe('buildSnapshot', () => {
     expect(snap.elements[1]!.name).toBe('Your name');
   });
 
+  it('exposes accordion expansion state', () => {
+    withBody(`
+      <button aria-expanded="false">FAQ one</button>
+      <button aria-expanded="true">FAQ two</button>
+      <button>FAQ three</button>
+    `);
+    const [one, two, three] = buildSnapshot(document).elements;
+    expect(one!.expanded).toBe(false);
+    expect(two!.expanded).toBe(true);
+    expect(three!.expanded).toBeUndefined();
+  });
+
   it('truncates page text and collapses blank lines', () => {
     withBody(`<p>${'x'.repeat(6000)}</p><p>tail</p>`);
     const snap = buildSnapshot(document);
