@@ -107,15 +107,26 @@ export default function SettingsView({ store, configs, refresh }: { store: Produ
   }
 
   async function test(productId: ProductId) {
+    const product = allProducts().find((p) => p.id === productId)!;
+    const card = cards[productId];
     const existing = configs?.find((c) => c.productId === productId);
-    if (!existing?.apiKey) {
-      setTestState({ productId, ok: false, message: 'save an api key first' });
+    const apiKey = card.apiKey || existing?.apiKey || '';
+    if (!apiKey) {
+      setTestState({ productId, ok: false, message: 'paste an api key first' });
       return;
     }
     setTesting(true);
     setTestState({ productId, ok: true, message: 'testing…' });
     try {
-      setTestState({ productId, ok: true, message: await runTest(existing) });
+      const provider: LlmProvider = {
+        productId,
+        baseUrl: existing?.baseUrl ?? product.defaults.baseUrl,
+        apiKey,
+        model: card.model || existing?.model || product.defaults.model,
+        ...(productId === 'glm' ? { thinking: card.thinking } : {}),
+        ...(productId === 'openai' && card.reasoningEffort ? { reasoningEffort: card.reasoningEffort } : {}),
+      };
+      setTestState({ productId, ok: true, message: await runTest(provider) });
     } catch (error) {
       setTestState({ productId, ok: false, message: error instanceof Error ? error.message : String(error) });
     } finally {
