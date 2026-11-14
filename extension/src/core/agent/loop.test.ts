@@ -307,7 +307,7 @@ describe('runTask', () => {
         { role: 'assistant', content: 'found 31 groups, saved shortlist.md' },
       ],
     });
-    const first = chat.mock.calls[0]![0] as ChatMessage[];
+    const first = (chat.mock.calls as unknown as Array<[ChatMessage[]]>)[0]![0];
     const roles = first.map((m) => m.role);
     expect(roles).toEqual(expect.arrayContaining(['system', 'user', 'assistant', 'user']));
     const joined = first.map((m) => m.content ?? '').join('\n');
@@ -409,7 +409,7 @@ describe('runTask', () => {
     const driver = fakeDriver({ snapshot: async () => page });
     const chat = vi.fn(async (_messages: ChatMessage[]) => reply('', [toolCall('click', { ref: 'e38' })]));
     const result = await runTask('check the filter then click rows', deps({ driver, chat }));
-    const first = chat.mock.calls[0]![0] as ChatMessage[];
+    const first = (chat.mock.calls as unknown as Array<[ChatMessage[]]>)[0]![0];
     const observation = first.find((m) => m.role === 'user' && m.content?.includes('CURRENT PAGE'))?.content ?? '';
     expect(observation).toContain('value="New"');
     expect(observation).toContain('options=All|New|Applied|Automated');
