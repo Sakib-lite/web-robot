@@ -912,3 +912,37 @@ select {
   gap: 3px;
   padding: 4px 0 4px 22px;
 }
+
+.conv-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px;
+  flex-wrap: wrap;
+}
+
+.conv-head .card-summary {
+  flex: 1;
+  min-width: 80px;
+}
+
+.small-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+.composer {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  margin-top: 8px;
+}
+
+.composer textarea {
+  flex: 1;
+  resize: vertical;
+}
+
+.composer .primary {
+  align-self: flex-end;
+}
