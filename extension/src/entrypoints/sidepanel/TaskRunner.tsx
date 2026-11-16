@@ -46,7 +46,6 @@ export default function TaskRunner({
   const [stepsMode, setStepsMode] = useState(false);
   const [taskSteps, setTaskSteps] = useState<string[]>([]);
   const [chatTaskId, setChatTaskId] = useState<number | ''>('');
-  const [chatInput, setChatInput] = useState('');
   const [chatState, setChatState] = useState<string | null>(null);
   const [chatReload, setChatReload] = useState(0);
   const [backendUrlState, setBackendUrlState] = useState('');
@@ -307,26 +306,26 @@ export default function TaskRunner({
   }
 
   function send() {
-    if (!task.trim()) return;
+    const message = task.trim();
+    if (!message) return;
     if (chatTaskId) {
-      sentAtRef.current = Date.now();
-      setAwaitingReply(true);
-      setChatInput(task.trim());
-      setTask('');
-      void sendChat();
+      void sendChat(message);
     } else {
       void run();
     }
   }
 
-  async function sendChat() {
-    if (!chatTaskId || !chatInput.trim()) return;
+  async function sendChat(message: string) {
+    if (!chatTaskId || !message.trim()) return;
+    sentAtRef.current = Date.now();
+    setAwaitingReply(true);
+    setTask('');
     setChatState('sending…');
     try {
       const res = await fetch(`${await getBackendUrl()}/tasks/${chatTaskId}/continue`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ message: chatInput.trim() }),
+        body: JSON.stringify({ message: message.trim() }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setChatReload((k) => k + 1);
@@ -357,8 +356,12 @@ export default function TaskRunner({
   }, [awaitingReply, chatTaskId]);
 
   function handleLatest(message: ChatMessageRow | null) {
-    if (!awaitingReply || !message || message.role !== 'agent') return;
-    if (new Date(message.createdAt).getTime() > sentAtRef.current) setAwaitingReply(false);
+    if (!awaitingReply) return;
+    if (message && message.role === 'agent' && new Date(message.createdAt).getTime() > sentAtRef.current) {
+      setAwaitingReply(false);
+      return;
+    }
+    if (['failed', 'stopped'].includes(activeTask?.status ?? '')) setAwaitingReply(false);
   }
 
   return (

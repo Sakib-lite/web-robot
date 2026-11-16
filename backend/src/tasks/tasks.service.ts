@@ -29,6 +29,7 @@ export class TasksService {
       effort: input.effort ?? null,
       steps: steps.length ? steps : null,
     });
+    await this.messages.save({ taskId: task.id, role: 'user', content: input.taskText });
     return { id: task.id };
   }
 
