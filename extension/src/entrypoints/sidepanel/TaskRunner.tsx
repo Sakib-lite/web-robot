@@ -10,11 +10,10 @@ import { getProduct, catalogModels, type Effort, type ProductId } from '@/core/l
 import { getBackendUrl } from '@/core/telemetry/settings';
 import { Chevron, Collapse } from './common/ui';
 import { StepsEditor } from './StepsEditor';
-import { Transcript, type ChatMessageRow, type RecentTask } from './ChatSection';
+import { LiveProgress, Transcript, type ChatMessageRow, type RecentTask } from './ChatSection';
 import { startTelemetry } from '@/core/telemetry/client';
 import { polishPrompt } from '@/core/agent/polish';
 import PromptPolisher from './PromptPolisher';
-import ResultView from './ResultView';
 
 interface SkillOption {
   slug: string;
@@ -365,26 +364,120 @@ export default function TaskRunner({
   }
 
   return (
-    <div className="runner">
+    <div className="runner conv">
       <div className="conv-head">
-        <span className="card-title">{chatTaskId ? `#${chatTaskId}` : 'new conversation'}</span>
-        <span className="card-summary">
-          {running ? 'running…' : awaitingReply ? 'waiting for reply…' : chatTaskId ? (activeTask?.status ?? '') : task.trim() ? task.trim().slice(0, 50) : 'describe a task'}
+        <span className={`conv-status ${(running || awaitingReply) ? 'on' : ''}`}>
+          {chatTaskId ? `#${chatTaskId}` : 'new'} · {running ? 'running' : awaitingReply ? 'waiting' : chatTaskId ? (activeTask?.status ?? '') : 'chat'}
         </span>
-        {chatTaskId !== '' && (
-          <>
+        <div className="conv-actions">
+          {chatTaskId !== '' && (
             <a className="muted small" href={`${backendUrlState || 'http://127.0.0.1:3010'}/tasks/${chatTaskId}/debug`} target="_blank" rel="noreferrer">
               debug
             </a>
-            <button className="danger small-btn" onClick={() => void killSelected()} title="mark this task stopped and reload the extension - stops any in-flight run">
+          )}
+          {chatTaskId !== '' && (
+            <button className="small-btn" onClick={() => void killSelected()} title="stop this task and reload the extension">
               kill
             </button>
-          </>
-        )}
-        <button disabled={running} onClick={newConversation} title="start a fresh conversation">
-          new chat
-        </button>
+          )}
+          <button className="small-btn" disabled={running} onClick={newConversation} title="start a fresh conversation">
+            new chat
+          </button>
+        </div>
       </div>
+
+      <details className="settings-block">
+        <summary>
+          <span className="msg-role">settings</span>
+          <span className="muted small">
+            {model || 'default model'} · {effort || 'default effort'}
+            {chatTaskId === '' && skill ? ` · ${skill}` : ''}
+            {chatTaskId === '' && context ? ` · ${context}` : ''}
+            {chatTaskId === '' && stepsMode ? ' · multi-step' : ''}
+          </span>
+        </summary>
+        <div className="config-bar">
+          {chatTaskId === '' && (
+            <label className="config" title="split the task into ordered steps the agent executes as its milestone plan">
+              <span>steps</span>
+              <select value={stepsMode ? 'steps' : ''} onChange={(e) => { setStepsMode(e.target.value === 'steps'); if (!taskSteps.length) setTaskSteps(['']); }} disabled={running}>
+                <option value="">single</option>
+                <option value="steps">multi-step</option>
+              </select>
+            </label>
+          )}
+          {chatTaskId === '' && skills.length > 0 && (
+            <label className="config">
+              <span>skill</span>
+              <select value={skill} onChange={(e) => setSkill(e.target.value)} disabled={running} title={skills.find((x) => x.slug === skill)?.description ?? 'pick a skill'}>
+                <option value="">none</option>
+                {skills.map((x) => (
+                  <option key={x.slug} value={x.slug}>
+                    {x.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {chatTaskId === '' && contexts.length > 0 && (
+            <label className="config">
+              <span>context</span>
+              <select value={context} onChange={(e) => setContext(e.target.value)} disabled={running} title="attach a saved profile as background facts">
+                <option value="">none</option>
+                {contexts.map((c) => (
+                  <option key={c.slug} value={c.slug}>
+                    {c.slug} · {(c.bytes / 1024).toFixed(1)}k
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className="config">
+            <span>model</span>
+            <select value={model} onChange={(e) => setModel(e.target.value)} disabled={running || !!chatTaskId} title="model for the first task of this conversation">
+              <option value="">default</option>
+              {modelOptions.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="config">
+            <span>effort</span>
+            <select value={effort} onChange={(e) => setEffort(e.target.value)} disabled={running || !!chatTaskId} title="reasoning effort for this conversation">
+              <option value="">default</option>
+              {effortOptions.map((e) => (
+                <option key={e} value={e}>
+                  {e}
+                </option>
+              ))}
+            </select>
+          </label>
+          {chatTaskId === '' && (
+            <button disabled={running || planning || !task.trim()} onClick={plan} title="inspect the browser first, then propose an editable milestone plan">
+              {planning ? 'planning…' : 'plan'}
+            </button>
+          )}
+        </div>
+        {chatTaskId === '' && stepsMode && (
+          <StepsEditor steps={taskSteps} running={running} onSet={setStepAt} onRemove={removeStep} onAdd={() => setTaskSteps((prev) => [...prev, ''])} />
+        )}
+      </details>
+
+      {recentTasks.length > 0 && (
+        <label className="config conv-open">
+          <span>open</span>
+          <select value={chatTaskId === '' ? '' : chatTaskId} onChange={(e) => { if (e.target.value) openConversation(Number(e.target.value)); }} disabled={running}>
+            <option value="">recent conversation…</option>
+            {recentTasks.map((t) => (
+              <option key={t.id} value={t.id}>
+                #{t.id} · {t.status} · {t.taskText.trim().slice(0, 28)}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
       <Transcript
         taskId={chatTaskId}
@@ -393,32 +486,40 @@ export default function TaskRunner({
         onLatest={handleLatest}
       />
 
+      <LiveProgress taskId={chatTaskId} backendUrl={backendUrlState || 'http://127.0.0.1:3010'} active={running || awaitingReply} />
+
       {steps.length > 0 && (
-        <ol className="steps">
-          {steps.map((step) => (
-            <li key={step.index} className={step.ok ? 'step' : 'step failed'}>
-              <details className="step-details">
-                <summary>
-                  <span className="step-idx">{step.index}</span>
-                  <span className="step-call">{step.call}</span>
-                  {!step.ok && <span className="muted"> ✗</span>}
-                </summary>
-                <span className="step-body">
-                  <span className="muted">{step.detail}</span>
-                  {step.thinking && (
-                    <details className="step-thinking">
-                      <summary>thinking</summary>
-                      <pre>{step.thinking}</pre>
-                    </details>
-                  )}
-                </span>
-              </details>
-            </li>
-          ))}
-        </ol>
+        <details className="run-block" open={running}>
+          <summary>
+            <span className="msg-role">run · {steps.length} step{steps.length === 1 ? '' : 's'}</span>
+          </summary>
+          <ol className="steps">
+            {steps.map((step) => (
+              <li key={step.index} className={step.ok ? 'step' : 'step failed'}>
+                <details className="step-details">
+                  <summary>
+                    <span className="step-idx">{step.index}</span>
+                    <span className="step-call">{step.call}</span>
+                    {!step.ok && <span className="muted"> ✗</span>}
+                  </summary>
+                  <span className="step-body">
+                    <span className="muted">{step.detail}</span>
+                    {step.thinking && (
+                      <details className="step-thinking">
+                        <summary>thinking</summary>
+                        <pre>{step.thinking}</pre>
+                      </details>
+                    )}
+                  </span>
+                </details>
+              </li>
+            ))}
+          </ol>
+        </details>
       )}
 
       {error && <div className="note err">{error}</div>}
+      {chatState && <div className="muted small">{chatState}</div>}
 
       <PromptPolisher
         disabled={running}
@@ -430,103 +531,6 @@ export default function TaskRunner({
         onUse={(p) => setTask(p)}
       />
 
-      <div className="config-bar">
-        {recentTasks.length > 0 && (
-          <label className="config" title="open a recent conversation with its full history">
-            <span>open</span>
-            <select value={chatTaskId === '' ? '' : chatTaskId} onChange={(e) => { if (e.target.value) openConversation(Number(e.target.value)); }} disabled={running}>
-              <option value="">recent…</option>
-              {recentTasks.map((t) => (
-                <option key={t.id} value={t.id}>
-                  #{t.id} · {t.status} · {t.taskText.trim().slice(0, 30)}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {chatTaskId === '' && (
-          <label className="config" title="split the task into ordered steps the agent executes as its milestone plan - it decides HOW to do each">
-            <span>steps</span>
-            <select value={stepsMode ? 'steps' : ''} onChange={(e) => { setStepsMode(e.target.value === 'steps'); if (!taskSteps.length) setTaskSteps(['']); }} disabled={running}>
-              <option value="">single</option>
-              <option value="steps">multi-step</option>
-            </select>
-          </label>
-        )}
-        {chatTaskId === '' && skills.length > 0 && (
-          <label className="config">
-            <span>skill</span>
-            <select value={skill} onChange={(e) => setSkill(e.target.value)} disabled={running} title={skills.find((s) => s.slug === skill)?.description ?? 'pick a skill'}>
-              <option value="">none</option>
-              {skills.map((s) => (
-                <option key={s.slug} value={s.slug}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {chatTaskId === '' && contexts.length > 0 && (
-          <label className="config">
-            <span>context</span>
-            <select value={context} onChange={(e) => setContext(e.target.value)} disabled={running} title="attach a saved profile as background facts for this task">
-              <option value="">none</option>
-              {contexts.map((c) => (
-                <option key={c.slug} value={c.slug}>
-                  {c.slug} · {(c.bytes / 1024).toFixed(1)}k
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {modelOptions.length > 0 && (
-          <label className="config">
-            <span>model</span>
-            <select value={model} onChange={(e) => setModel(e.target.value)} disabled={running || !!chatTaskId} title="model for this task (overrides the provider default)">
-              <option value="">default</option>
-              {modelOptions.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {effortOptions.length > 0 && (
-          <label className="config">
-            <span>effort</span>
-            <select value={effort} onChange={(e) => setEffort(e.target.value)} disabled={running || !!chatTaskId} title="reasoning effort for this task">
-              <option value="">default</option>
-              {effortOptions.map((e) => (
-                <option key={e} value={e}>
-                  {e}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <div className="run-controls">
-          <button className="primary" disabled={running || planning || !task.trim()} onClick={chatTaskId ? send : run}>
-            {running ? 'running…' : chatTaskId ? 'send' : 'run'}
-          </button>
-          {chatTaskId === '' && (
-            <button disabled={running || planning || !task.trim()} onClick={plan} title="inspect the current browser state first, then propose an editable milestone plan">
-              {planning ? 'planning…' : 'plan'}
-            </button>
-          )}
-          <button className="danger" disabled={!running} onClick={stop}>
-            stop
-          </button>
-        </div>
-      </div>
-
-      {chatTaskId === '' && stepsMode && (
-        <StepsEditor steps={taskSteps} running={running} onSet={setStepAt} onRemove={removeStep} onAdd={() => setTaskSteps((prev) => [...prev, ''])} />
-      )}
-
-      {chatState && <div className="muted small">{chatState}</div>}
-      {!running && usingProvider && <div className="muted small">using {usingProvider}</div>}
-
       <div className="composer">
         <textarea
           value={task}
@@ -537,13 +541,19 @@ export default function TaskRunner({
               send();
             }
           }}
-          placeholder={chatTaskId ? `message #${chatTaskId} - it remembers the whole conversation (Cmd+Enter to send)` : 'describe a task - it starts a conversation the agent keeps forever (Cmd+Enter to run)'}
+          placeholder={chatTaskId ? `message #${chatTaskId} - it remembers everything (Cmd+Enter)` : 'describe a task to start a conversation (Cmd+Enter)'}
           rows={chatTaskId ? 2 : 3}
           disabled={running}
         />
-        <button className="primary" disabled={running || planning || !task.trim()} onClick={send}>
-          {chatTaskId ? 'send' : 'run'}
-        </button>
+        {running ? (
+          <button className="danger" onClick={stop}>
+            stop
+          </button>
+        ) : (
+          <button className="primary" disabled={!task.trim() || planning} onClick={send}>
+            {chatTaskId ? 'send' : 'run'}
+          </button>
+        )}
       </div>
     </div>
   );

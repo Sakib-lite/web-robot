@@ -64,13 +64,80 @@ export function Transcript({
       {!loading && messages.length === 0 && (
         <div className="muted small">no messages yet - send the first one below</div>
       )}
-      {messages.map((m) => (
-        <div key={m.id} className={`bubble ${m.role === 'agent' ? 'bubble-agent' : 'bubble-user'}`}>
-          <span className="bubble-role">{m.role === 'agent' ? 'web-robot' : 'you'}</span>
-          <span className="bubble-text">{m.content}</span>
-        </div>
+      {messages.map((m, i) => (
+        <details key={m.id} className={`msg msg-${m.role === 'agent' ? 'agent' : 'user'}`} open={i === messages.length - 1}>
+          <summary>
+            <span className="msg-role">{m.role === 'agent' ? 'web-robot' : 'you'}</span>
+            <span className="msg-preview">{m.content.replace(/\s+/g, ' ').slice(0, 90)}</span>
+            <span className="msg-time">{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+          </summary>
+          <div className="msg-body">{m.content}</div>
+        </details>
       ))}
       <div ref={bottomRef} />
     </div>
+  );
+}
+
+interface LiveCall {
+  step: number;
+  thinking: string | null;
+  content: string;
+  tool: string | null;
+  error: string | null;
+}
+
+export function LiveProgress({ taskId, backendUrl, active }: { taskId: number | ''; backendUrl: string; active: boolean }) {
+  const [calls, setCalls] = useState<LiveCall[]>([]);
+  const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    if (!active || !taskId) {
+      setCalls([]);
+      setStatus('');
+      return;
+    }
+    let alive = true;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${backendUrl}/tasks/${taskId}/live`, { signal: AbortSignal.timeout(4000) });
+        if (!res.ok) return;
+        const body = (await res.json()) as { status: string; calls: LiveCall[] };
+        if (!alive) return;
+        setStatus(body.status);
+        setCalls(body.calls.filter((c) => c.step > 0));
+      } catch {
+      }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 2500);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [active, taskId, backendUrl]);
+
+  if (!active || !taskId) return null;
+  const lines = calls.slice(-8);
+
+  return (
+    <details className="run-block live" open>
+      <summary>
+        <span className={`run-dot ${status || 'queued'}`} />
+        <span className="msg-role">
+          {status === 'running' ? 'running' : status || 'queued'} · {calls.length} step{calls.length === 1 ? '' : 's'}
+        </span>
+      </summary>
+      <div className="run-lines">
+        {lines.length === 0 && <div className="muted small">starting…</div>}
+        {lines.map((c, i) => (
+          <div key={`${c.step}-${i}`} className="run-line">
+            <span className="step-idx">{c.step}</span>
+            <span className="step-call">{c.tool ?? (c.error ? 'error' : 'reply')}</span>
+            {c.error && <span className="muted"> {c.error.slice(0, 60)}</span>}
+          </div>
+        ))}
+      </div>
+    </details>
   );
 }
