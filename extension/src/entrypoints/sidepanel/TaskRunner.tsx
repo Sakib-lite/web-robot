@@ -388,7 +388,7 @@ export default function TaskRunner({
 
       <details className="settings-block">
         <summary>
-          <span className="msg-role">settings</span>
+          <span className="msg-role">config</span>
           <span className="muted small">
             {model || 'default model'} · {effort || 'default effort'}
             {chatTaskId === '' && skill ? ` · ${skill}` : ''}
@@ -463,6 +463,15 @@ export default function TaskRunner({
         {chatTaskId === '' && stepsMode && (
           <StepsEditor steps={taskSteps} running={running} onSet={setStepAt} onRemove={removeStep} onAdd={() => setTaskSteps((prev) => [...prev, ''])} />
         )}
+        <PromptPolisher
+          disabled={running}
+          polish={async (input) => {
+            const resolved = await resolveProvider();
+            if (!resolved) throw new Error('no active llm provider - add one in settings first');
+            return polishPrompt(input, resolved.provider);
+          }}
+          onUse={(p) => setTask(p)}
+        />
       </details>
 
       {recentTasks.length > 0 && (
@@ -520,16 +529,6 @@ export default function TaskRunner({
 
       {error && <div className="note err">{error}</div>}
       {chatState && <div className="muted small">{chatState}</div>}
-
-      <PromptPolisher
-        disabled={running}
-        polish={async (input) => {
-          const resolved = await resolveProvider();
-          if (!resolved) throw new Error('no active llm provider - add one in settings first');
-          return polishPrompt(input, resolved.provider);
-        }}
-        onUse={(p) => setTask(p)}
-      />
 
       <div className="composer">
         <textarea

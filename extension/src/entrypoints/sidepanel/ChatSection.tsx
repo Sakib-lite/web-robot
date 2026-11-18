@@ -64,8 +64,8 @@ export function Transcript({
       {!loading && messages.length === 0 && (
         <div className="muted small">no messages yet - send the first one below</div>
       )}
-      {messages.map((m, i) => (
-        <details key={m.id} className={`msg msg-${m.role === 'agent' ? 'agent' : 'user'}`} open={i === messages.length - 1}>
+      {messages.map((m) => (
+        <details key={m.id} className={`msg msg-${m.role === 'agent' ? 'agent' : 'user'}`}>
           <summary>
             <span className="msg-role">{m.role === 'agent' ? 'web-robot' : 'you'}</span>
             <span className="msg-preview">{m.content.replace(/\s+/g, ' ').slice(0, 90)}</span>
