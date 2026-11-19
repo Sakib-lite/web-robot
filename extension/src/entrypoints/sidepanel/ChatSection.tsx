@@ -14,6 +14,10 @@ export interface ChatMessageRow {
   createdAt: string;
 }
 
+function previewOf(content: string): string {
+  return content.replace(/\s+/g, ' ').trim().slice(0, 110);
+}
+
 export function Transcript({
   taskId,
   backendUrl,
@@ -67,8 +71,9 @@ export function Transcript({
       {messages.map((m) => (
         <details key={m.id} className={`msg msg-${m.role === 'agent' ? 'agent' : 'user'}`}>
           <summary>
+            <span className="msg-arrow" aria-hidden="true" />
             <span className="msg-role">{m.role === 'agent' ? 'web-robot' : 'you'}</span>
-            <span className="msg-preview">{m.content.replace(/\s+/g, ' ').slice(0, 90)}</span>
+            <span className="msg-preview">{previewOf(m.content)}</span>
             <span className="msg-time">{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
           </summary>
           <div className="msg-body">{m.content}</div>

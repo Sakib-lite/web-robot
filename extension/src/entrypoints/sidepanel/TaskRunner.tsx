@@ -369,6 +369,22 @@ export default function TaskRunner({
         <span className={`conv-status ${(running || awaitingReply) ? 'on' : ''}`}>
           {chatTaskId ? `#${chatTaskId}` : 'new'} · {running ? 'running' : awaitingReply ? 'waiting' : chatTaskId ? (activeTask?.status ?? '') : 'chat'}
         </span>
+        {recentTasks.length > 0 && (
+          <select
+            className="conv-open"
+            value={chatTaskId === '' ? '' : chatTaskId}
+            onChange={(e) => { if (e.target.value) openConversation(Number(e.target.value)); }}
+            disabled={running}
+            title="open a recent conversation with its full history"
+          >
+            <option value="">open…</option>
+            {recentTasks.map((t) => (
+              <option key={t.id} value={t.id}>
+                #{t.id} · {t.status} · {t.taskText.trim().slice(0, 24)}
+              </option>
+            ))}
+          </select>
+        )}
         <div className="conv-actions">
           {chatTaskId !== '' && (
             <a className="muted small" href={`${backendUrlState || 'http://127.0.0.1:3010'}/tasks/${chatTaskId}/debug`} target="_blank" rel="noreferrer">
@@ -474,58 +490,46 @@ export default function TaskRunner({
         />
       </details>
 
-      {recentTasks.length > 0 && (
-        <label className="config conv-open">
-          <span>open</span>
-          <select value={chatTaskId === '' ? '' : chatTaskId} onChange={(e) => { if (e.target.value) openConversation(Number(e.target.value)); }} disabled={running}>
-            <option value="">recent conversation…</option>
-            {recentTasks.map((t) => (
-              <option key={t.id} value={t.id}>
-                #{t.id} · {t.status} · {t.taskText.trim().slice(0, 28)}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
+      <div className="chat-scroll">
+        <Transcript
+          taskId={chatTaskId}
+          backendUrl={backendUrlState || 'http://127.0.0.1:3010'}
+          reloadKey={chatReload}
+          onLatest={handleLatest}
+        />
 
-      <Transcript
-        taskId={chatTaskId}
-        backendUrl={backendUrlState || 'http://127.0.0.1:3010'}
-        reloadKey={chatReload}
-        onLatest={handleLatest}
-      />
+        <LiveProgress taskId={chatTaskId} backendUrl={backendUrlState || 'http://127.0.0.1:3010'} active={running || awaitingReply} />
 
-      <LiveProgress taskId={chatTaskId} backendUrl={backendUrlState || 'http://127.0.0.1:3010'} active={running || awaitingReply} />
-
-      {steps.length > 0 && (
-        <details className="run-block" open={running}>
-          <summary>
-            <span className="msg-role">run · {steps.length} step{steps.length === 1 ? '' : 's'}</span>
-          </summary>
-          <ol className="steps">
-            {steps.map((step) => (
-              <li key={step.index} className={step.ok ? 'step' : 'step failed'}>
-                <details className="step-details">
-                  <summary>
-                    <span className="step-idx">{step.index}</span>
-                    <span className="step-call">{step.call}</span>
-                    {!step.ok && <span className="muted"> ✗</span>}
-                  </summary>
-                  <span className="step-body">
-                    <span className="muted">{step.detail}</span>
-                    {step.thinking && (
-                      <details className="step-thinking">
-                        <summary>thinking</summary>
-                        <pre>{step.thinking}</pre>
-                      </details>
-                    )}
-                  </span>
-                </details>
-              </li>
-            ))}
-          </ol>
-        </details>
-      )}
+        {steps.length > 0 && (
+          <details className="run-block" open={running}>
+            <summary>
+              <span className="msg-role">run · {steps.length} step{steps.length === 1 ? '' : 's'}</span>
+            </summary>
+            <ol className="steps">
+              {steps.map((step) => (
+                <li key={step.index} className={step.ok ? 'step' : 'step failed'}>
+                  <details className="step-details">
+                    <summary>
+                      <span className="step-idx">{step.index}</span>
+                      <span className="step-call">{step.call}</span>
+                      {!step.ok && <span className="muted"> ✗</span>}
+                    </summary>
+                    <span className="step-body">
+                      <span className="muted">{step.detail}</span>
+                      {step.thinking && (
+                        <details className="step-thinking">
+                          <summary>thinking</summary>
+                          <pre>{step.thinking}</pre>
+                        </details>
+                      )}
+                    </span>
+                  </details>
+                </li>
+              ))}
+            </ol>
+          </details>
+        )}
+      </div>
 
       {error && <div className="note err">{error}</div>}
       {chatState && <div className="muted small">{chatState}</div>}
