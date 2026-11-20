@@ -109,8 +109,15 @@ export function LiveProgress({ taskId, backendUrl, active }: { taskId: number | 
         if (!res.ok) return;
         const body = (await res.json()) as { status: string; calls: LiveCall[] };
         if (!alive) return;
+        if (['done', 'failed', 'stopped', 'completed', 'canceled'].includes(body.status)) {
+          setCalls([]);
+          setStatus('');
+          return;
+        }
         setStatus(body.status);
-        setCalls(body.calls.filter((c) => c.step > 0));
+        const all = body.calls.filter((c) => c.step > 0);
+        const lastStart = all.map((c) => c.step).lastIndexOf(1);
+        setCalls(lastStart >= 0 ? all.slice(lastStart) : all);
       } catch {
       }
     };
@@ -123,25 +130,32 @@ export function LiveProgress({ taskId, backendUrl, active }: { taskId: number | 
   }, [active, taskId, backendUrl]);
 
   if (!active || !taskId) return null;
-  const lines = calls.slice(-8);
+  const actions = calls.filter((c) => c.tool && c.tool !== 'done');
+  const finished = calls.some((c) => c.tool === 'done');
 
   return (
     <details className="run-block live" open>
       <summary>
         <span className={`run-dot ${status || 'queued'}`} />
         <span className="msg-role">
-          {status === 'running' ? 'running' : status || 'queued'} · {calls.length} step{calls.length === 1 ? '' : 's'}
+          {status || 'queued'} · {actions.length} action{actions.length === 1 ? '' : 's'}
         </span>
       </summary>
       <div className="run-lines">
-        {lines.length === 0 && <div className="muted small">starting…</div>}
-        {lines.map((c, i) => (
+        {actions.length === 0 && !finished && <div className="muted small">starting…</div>}
+        {actions.map((c, i) => (
           <div key={`${c.step}-${i}`} className="run-line">
             <span className="step-idx">{c.step}</span>
-            <span className="step-call">{c.tool ?? (c.error ? 'error' : 'reply')}</span>
+            <span className="step-call">{c.tool}</span>
             {c.error && <span className="muted"> {c.error.slice(0, 60)}</span>}
           </div>
         ))}
+        {finished && (
+          <div className="run-line">
+            <span className="step-idx">✓</span>
+            <span className="step-call">done</span>
+          </div>
+        )}
       </div>
     </details>
   );
