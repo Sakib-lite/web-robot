@@ -1105,3 +1105,40 @@ select {
   max-height: 260px;
   overflow-y: auto;
 }
+
+.msg-role,
+.run-block > summary .msg-role {
+  font-weight: 700;
+}
+
+.md p {
+  margin: 0 0 6px;
+}
+
+.md p:last-child {
+  margin-bottom: 0;
+}
+
+.md h3,
+.md h4,
+.md h5 {
+  margin: 6px 0 4px;
+  font-size: 12px;
+}
+
+.md ul,
+.md ol {
+  margin: 0 0 6px;
+  padding-left: 18px;
+}
+
+.md code {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  padding: 0 3px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.md a {
+  color: inherit;
+}

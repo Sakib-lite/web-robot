@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Markdown } from './common/Markdown';
 
 export interface RecentTask {
   id: number;
@@ -76,7 +77,9 @@ export function Transcript({
             <span className="msg-preview">{previewOf(m.content)}</span>
             <span className="msg-time">{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
           </summary>
-          <div className="msg-body">{m.content}</div>
+          <div className="msg-body">
+            <Markdown text={m.content} />
+          </div>
         </details>
       ))}
       <div ref={bottomRef} />
