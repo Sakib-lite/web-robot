@@ -101,7 +101,7 @@ export default function App() {
   const runningLabel = manualRun
     ? `running · step ${manualRun.stepCount}`
     : remoteRunning
-      ? 'remote task running'
+      ? `task #${remoteTaskId ?? ''} running`
       : '';
   const runningHint = manualRun?.snippet || remoteState;
 

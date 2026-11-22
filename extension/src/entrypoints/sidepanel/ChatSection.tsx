@@ -147,11 +147,15 @@ export function LiveProgress({ taskId, backendUrl, active }: { taskId: number | 
       <div className="run-lines">
         {actions.length === 0 && !finished && <div className="muted small">starting…</div>}
         {actions.map((c, i) => (
-          <div key={`${c.step}-${i}`} className="run-line">
-            <span className="step-idx">{c.step}</span>
-            <span className="step-call">{c.tool}</span>
-            {c.error && <span className="muted"> {c.error.slice(0, 60)}</span>}
-          </div>
+          <details key={`${c.step}-${i}`} className="run-line live-step" open={i === actions.length - 1}>
+            <summary>
+              <span className="step-idx">{c.step}</span>
+              <span className="step-call">{c.tool}</span>
+              {c.error && <span className="muted"> {c.error.slice(0, 60)}</span>}
+            </summary>
+            {c.thinking && <pre className="step-thinking-pre">{c.thinking.slice(0, 1200)}</pre>}
+            {c.content && !c.thinking && <pre className="step-thinking-pre">{c.content.slice(0, 600)}</pre>}
+          </details>
         ))}
         {finished && (
           <div className="run-line">
