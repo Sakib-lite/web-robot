@@ -1,6 +1,12 @@
 # WebRobot
 
 
+<img width="560" alt="Video preview" src="public/assets/title-video-preview.svg" />
+
+<img width="800" alt="WebRobot task panel preview" src="public/assets/task-preview.gif" />
+
+<img width="560" alt="Live demo" src="public/assets/title-live-demo.svg" />
+
 <img width="1200" alt="WebRobot demo" src="public/assets/demo.gif" />
 
 Autonomous browser agent for Chrome. Tell it a task in plain language — it opens pages, clicks, fills forms, extracts information, and reports back, deciding each next step on its own. Works in your real Chrome with your existing logins. Any OpenAI-compatible LLM can drive it.
