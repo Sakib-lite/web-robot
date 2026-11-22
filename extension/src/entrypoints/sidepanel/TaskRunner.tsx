@@ -10,7 +10,7 @@ import { getProduct, catalogModels, type Effort, type ProductId } from '@/core/l
 import { getBackendUrl } from '@/core/telemetry/settings';
 import { Chevron, Collapse } from './common/ui';
 import { StepsEditor } from './StepsEditor';
-import { LiveProgress, Transcript, type ChatMessageRow, type RecentTask } from './ChatSection';
+import { Transcript, type ChatMessageRow, type RecentTask } from './ChatSection';
 import { startTelemetry } from '@/core/telemetry/client';
 import { polishPrompt } from '@/core/agent/polish';
 import PromptPolisher from './PromptPolisher';
@@ -354,6 +354,46 @@ export default function TaskRunner({
     return () => clearInterval(timer);
   }, [awaitingReply, chatTaskId]);
 
+  useEffect(() => {
+    if (!awaitingReply || !chatTaskId) return;
+    let alive = true;
+    const base = backendUrlState || 'http://127.0.0.1:3010';
+    const poll = async () => {
+      try {
+        const res = await fetch(`${base}/tasks/${chatTaskId}/live`, { signal: AbortSignal.timeout(4000) });
+        if (!res.ok) return;
+        const body = (await res.json()) as {
+          actions?: Array<{ step: number; tool: string; detail: string; ok: boolean }>;
+          calls?: Array<{ step: number; thinking: string | null }>;
+        };
+        if (!alive || !Array.isArray(body.actions) || body.actions.length === 0) return;
+        const thinkingByStep = new Map<number, string>();
+        for (const c of body.calls ?? []) {
+          if (c.thinking && !thinkingByStep.has(c.step)) thinkingByStep.set(c.step, c.thinking);
+        }
+        const all = body.actions;
+        const lastStart = all.map((a) => a.step).lastIndexOf(1);
+        const current = lastStart >= 0 ? all.slice(lastStart) : all;
+        setSteps(
+          current.map((a) => ({
+            index: a.step,
+            call: a.tool,
+            detail: a.detail,
+            ok: a.ok,
+            ...(thinkingByStep.get(a.step) ? { thinking: thinkingByStep.get(a.step)!.slice(0, 2000) } : {}),
+          })),
+        );
+      } catch {
+      }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 2500);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [awaitingReply, chatTaskId, backendUrlState]);
+
   function handleLatest(message: ChatMessageRow | null) {
     if (!awaitingReply) return;
     if (message && message.role === 'agent' && new Date(message.createdAt).getTime() > sentAtRef.current) {
@@ -498,10 +538,8 @@ export default function TaskRunner({
           onLatest={handleLatest}
         />
 
-        <LiveProgress taskId={chatTaskId} backendUrl={backendUrlState || 'http://127.0.0.1:3010'} active={running || awaitingReply} />
-
         {steps.length > 0 && (
-          <details className="run-block" open={running}>
+          <details className="run-block" open={running || awaitingReply}>
             <summary>
               <span className="msg-role">run · {steps.length} step{steps.length === 1 ? '' : 's'}</span>
             </summary>

@@ -120,7 +120,11 @@ export class TasksService {
       error: row.error ?? null,
       createdAt: row.createdAt,
     }));
-    return { id: taskId, status: task.status, stepCount: task.stepCount, calls };
+    const actionRows = await this.actions.find({ where: { taskId }, order: { id: 'DESC' }, take: 40 });
+    const actions = actionRows
+      .reverse()
+      .map((row) => ({ step: row.step, tool: row.tool, detail: row.detail ?? '', ok: row.ok, durationMs: row.durationMs ?? null }));
+    return { id: taskId, status: task.status, stepCount: task.stepCount, calls, actions };
   }
 
   async getDebugReport(taskId: number) {
