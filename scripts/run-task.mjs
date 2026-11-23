@@ -1,11 +1,5 @@
 #!/usr/bin/env node
 
-// queues tasks for the extension, waits for each to finish, prints failures + debug url:
-//   node scripts/run-task.mjs "open example.com and tell me the heading"
-//   node scripts/run-task.mjs --repeat 10 "list my github repos"     # same task 10x, sequentially
-//   node scripts/run-task.mjs --file tasks.txt                       # one task per line, sequentially
-//   node scripts/run-task.mjs --reload                               # ask the extension to reload itself
-
 import { readFileSync } from 'node:fs';
 
 const BACKEND = process.env.WEB_ROBOT_BACKEND ?? 'http://127.0.0.1:3010';

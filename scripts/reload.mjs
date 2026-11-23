@@ -1,8 +1,5 @@
 #!/usr/bin/env node
 
-// rebuilds the extension and reloads every unpacked web-robot target in the
-// running Chrome via the DevTools HTTP endpoint of an already-open debugging
-// port; falls back to plain rebuild + manual reload hint when the port is off
 
 import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -50,15 +47,11 @@ async function reloadViaDebugger(targets) {
       execSync(`curl -s --max-time 2 "http://127.0.0.1:9222/json/reload/${target.id}"`, { stdio: 'ignore' });
       log(`reloaded ${target.url}`);
     } catch {
-      // target may have gone away mid-loop
     }
   }
   return true;
 }
 
-// chrome.reload() through the extension's own service worker is the reliable
-// path; reach it via the remote-debugging pipe only when the user started
-// chrome with a debug port. otherwise print the two-click instruction.
 function manualHint() {
   log('now reload the extension — one click, no chrome://extensions trip:');
   log('  open the web-robot side panel → press the ⟳ button in the top bar');
@@ -70,8 +63,6 @@ build();
 if (targets && (await reloadViaDebugger(targets))) {
   log('done');
 } else {
-  // no debug port (always the case on the main Chrome profile) - ask the
-  // extension to reboot itself; it polls the backend for this every 10s
   try {
     const backend = process.env.WEB_ROBOT_BACKEND ?? 'http://127.0.0.1:3010';
     await fetch(`${backend}/control/reload`, { method: 'POST' });
