@@ -22,6 +22,7 @@ export interface TaskTelemetry {
 
 interface TaskMeta {
   taskText: string;
+  skill?: string;
   product: string;
   model: string;
   effort: string;

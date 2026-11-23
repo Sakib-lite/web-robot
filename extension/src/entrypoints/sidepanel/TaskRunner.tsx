@@ -115,8 +115,16 @@ export default function TaskRunner({
 
     setUsingProvider(`${runProvider.productId} · ${runProvider.model} · ${runProvider.thinking ?? 'off'}`);
 
+    let selected = skill;
+    let taskText = task;
+    const slash = /^\/([a-z0-9-]+)\s+([\s\S]+)/i.exec(task.trim());
+    if (slash && skills.some((s) => s.slug === slash[1])) {
+      selected = slash[1]!;
+      taskText = slash[2]!;
+    }
+
     const telemetry = await startTelemetry(
-      { taskText: task, product: runProvider.productId, model: runProvider.model, effort: runProvider.thinking ?? 'off', ...(effectiveSteps.length ? { steps: effectiveSteps } : {}) },
+      { taskText: task, ...(selected ? { skill: selected } : {}), product: runProvider.productId, model: runProvider.model, effort: runProvider.thinking ?? 'off', ...(effectiveSteps.length ? { steps: effectiveSteps } : {}) },
       backendUrl,
     );
     if (telemetry.taskId) setTraceInfo({ taskId: telemetry.taskId, backendUrl });
@@ -126,13 +134,6 @@ export default function TaskRunner({
     const workspaceInfo = await plane.describe().catch(() => null);
     const workspace = workspaceInfo?.enabled ? { plane, root: workspaceInfo.root } : undefined;
 
-    let selected = skill;
-    let taskText = task;
-    const slash = /^\/([a-z0-9-]+)\s+([\s\S]+)/i.exec(task.trim());
-    if (slash && skills.some((s) => s.slug === slash[1])) {
-      selected = slash[1]!;
-      taskText = slash[2]!;
-    }
     let preamble: string | undefined;
     let skillMaxSteps: number | undefined;
     if (selected) {

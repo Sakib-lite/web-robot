@@ -57,7 +57,10 @@ export async function runClaimedTask(
         if (full.defaults?.model && !taskModel) provider = { ...provider, model: full.defaults.model };
         if (full.defaults?.effort && !taskEffort) provider = { ...provider, thinking: full.defaults.effort as 'off' | 'low' | 'high' | 'max' };
         if (full.defaults?.maxSteps) maxSteps = Number(full.defaults.maxSteps);
-        if (full.body) preamble = `SKILL "${full.name ?? skill}" - follow this workflow for the whole task:\n\n${full.body}`.slice(0, 8000);
+        if (full.body) {
+          const skillPreamble = `SKILL "${full.name ?? skill}" - follow this workflow for the whole task:\n\n${full.body}`.slice(0, 8000);
+          preamble = preamble ? `${preamble}\n\n---\n\n${skillPreamble}` : skillPreamble;
+        }
       }
     } catch {
     }

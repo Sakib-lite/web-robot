@@ -14,6 +14,7 @@ export interface DebugReport {
   task: {
     id: number;
     taskText: string;
+    skill: string | null;
     status: string;
     summary: string | null;
     reason: string | null;
@@ -86,6 +87,7 @@ export function buildDebugReport(trace: TaskTrace): DebugReport {
     task: {
       id: trace.task.id,
       taskText: trace.task.taskText,
+      skill: trace.task.skill,
       status: trace.task.status,
       summary: trace.task.summary,
       reason: trace.task.reason,

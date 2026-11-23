@@ -20,10 +20,11 @@ export class TasksService {
     @InjectRepository(TaskMessage) private readonly messages: Repository<TaskMessage>,
   ) {}
 
-  async createTask(input: { taskText: string; product?: string; model?: string; effort?: string; steps?: string[] }) {
+  async createTask(input: { taskText: string; skill?: string; product?: string; model?: string; effort?: string; steps?: string[] }) {
     const steps = input.steps?.map((s) => s.trim()).filter(Boolean) ?? [];
     const task = await this.tasks.save({
       taskText: input.taskText,
+      skill: input.skill ?? null,
       product: input.product ?? null,
       model: input.model ?? null,
       effort: input.effort ?? null,
