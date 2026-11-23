@@ -19,11 +19,13 @@ export default function PromptPolisher({
 
   async function run() {
     if (!input.trim() || busy) return;
+    const draft = input;
     setBusy(true);
     setError(null);
     setResult(null);
     try {
-      setResult(await polish(input));
+      setResult(await polish(draft));
+      setInput('');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

@@ -308,6 +308,7 @@ export default function TaskRunner({
   function send() {
     const message = task.trim();
     if (!message) return;
+    setTask('');
     if (chatTaskId) {
       void sendChat(message);
     } else {
