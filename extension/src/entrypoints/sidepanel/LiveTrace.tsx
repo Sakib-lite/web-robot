@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { getBackendUrl } from '@/core/telemetry/settings';
+import { getBackendUrl } from '@/core/telemetry/settings.helper';
 
 interface LiveCall {
   step: number;

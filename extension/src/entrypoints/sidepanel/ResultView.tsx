@@ -1,6 +1,6 @@
 import { describeData } from './markdown';
 import { Markdown, MarkdownBlocks } from './common/Markdown';
-import type { TaskResult } from '@/core/agent/loop';
+import type { TaskResult } from '@/core/agent/loop/loop';
 
 export default function ResultView({ result }: { result: TaskResult }) {
   const data = describeData(result.data);

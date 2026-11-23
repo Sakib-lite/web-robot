@@ -1,4 +1,4 @@
-import { effectiveModel } from './modelSlots';
+import { effectiveModel } from './modelSlots.helper';
 import type { LlmProvider } from './providers';
 
 export type ProductId = 'glm' | 'openai' | 'generic' | 'ollama';

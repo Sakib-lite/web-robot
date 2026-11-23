@@ -4,7 +4,7 @@ import TaskRunner, { type RunState } from './TaskRunner';
 import { LiveTrace } from './LiveTrace';
 import { useProviders } from './useProviders';
 import { maybeRunRemoteWork, panelRemoteDeps } from '@/core/remote/worker';
-import { getBackendUrl } from '@/core/telemetry/settings';
+import { getBackendUrl } from '@/core/telemetry/settings.helper';
 
 export default function App() {
   const [view, setView] = useState<'task' | 'settings'>('task');

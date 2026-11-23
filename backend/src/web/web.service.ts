@@ -1,80 +1,8 @@
 import { Injectable } from '@nestjs/common';
 
-export class WebError extends Error {
-  constructor(
-    message: string,
-    readonly code: 'INVALID' | 'FETCH_FAILED' | 'NOT_TEXT' | 'SEARCH_FAILED',
-  ) {
-    super(message);
-  }
-}
-
-export interface FetchedPage {
-  url: string;
-  title: string;
-  text: string;
-  truncated: boolean;
-}
-
-export interface SearchHit {
-  title: string;
-  url: string;
-  snippet: string;
-}
-
-const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
-const FETCH_TIMEOUT_MS = 15000;
-const SEARCH_TIMEOUT_MS = 15000;
-const MAX_HTML_BYTES = 2_000_000;
-const MAX_TEXT_CHARS = 6000;
-const MIN_SEARCH_INTERVAL_MS = 1100;
-
-function stripTags(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)))
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\s+([.,;:!?])/g, '$1')
-    .replace(/\n\s*\n+/g, '\n')
-    .trim();
-}
-
-function cutBlocks(html: string): string {
-  return html.replace(/<(script|style|noscript|svg|template)\b[\s\S]*?<\/\1>/gi, ' ');
-}
-
-function pickMain(html: string): string {
-  for (const tag of ['main', 'article']) {
-    const match = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`, 'i').exec(html);
-    const inner = match?.[1] ?? '';
-    if (stripTags(inner).length > 200) return inner;
-  }
-  const body = /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(html)?.[1] ?? html;
-  return body;
-}
-
-function titleOf(html: string): string {
-  const raw = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] ?? '';
-  return stripTags(raw).slice(0, 200);
-}
-
-function decodeDdgUrl(href: string): string {
-  const encoded = /[?&]uddg=([^&]+)/.exec(href)?.[1];
-  if (encoded) {
-    try {
-      return decodeURIComponent(encoded);
-    } catch {
-      return href;
-    }
-  }
-  return href.startsWith('//') ? `https:${href}` : href;
-}
+import { WebError, type FetchedPage, type SearchHit } from './web.types';
+import { UA, FETCH_TIMEOUT_MS, SEARCH_TIMEOUT_MS, MAX_HTML_BYTES, MAX_TEXT_CHARS, MIN_SEARCH_INTERVAL_MS } from './web.constants';
+import { cutBlocks, decodeDdgUrl, pickMain, stripTags, titleOf } from './html.helper';
 
 @Injectable()
 export class WebService {

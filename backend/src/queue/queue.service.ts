@@ -5,15 +5,7 @@ import { ClaimedTask } from './dto/claimed-task.dto';
 import { Task } from '../tasks/entities/task.entity';
 import { TaskMessage } from '../tasks/entities/task-message.entity';
 
-function rawRows(res: unknown): any[] {
-  if (Array.isArray(res) && Array.isArray(res[0]) && typeof res[1] === 'number') return res[0] as any[];
-  return Array.isArray(res) ? (res as any[]) : [];
-}
-
-function rawCount(res: unknown): number {
-  if (Array.isArray(res) && typeof res[1] === 'number') return res[1];
-  return (res as { rowCount?: number })?.rowCount ?? 0;
-}
+import { rawCount, rawRows } from './sql.helper';
 
 @Injectable()
 export class QueueService implements OnModuleInit {

@@ -1,49 +1,12 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { DENY_PATTERNS, MAX_WRITE_BASE64_BYTES, EXEC_DEFAULT_TIMEOUT_MS, EXEC_MAX_TIMEOUT_MS, EXEC_OUTPUT_CAP, MAX_EDIT_OLD_CHARS, MAX_LIST_ENTRIES, MAX_WRITE_CHARS, READ_DEFAULT_LIMIT, READ_LINE_TRUNCATE, READ_MAX_FILE_BYTES, READ_MAX_LIMIT } from './workspace.constants';
+import { WorkspaceError, type DirEntry, type ExecResult, type FileSlice } from './workspace.types';
+import { capOutput, fileEndsWithoutNewline } from './fs.helper';
+import { parseFrontmatter } from './skills.helper';
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import * as fs from 'node:fs/promises';
-
-export type WorkspaceErrorCode =
-  | 'ESCAPE'
-  | 'NOT_FOUND'
-  | 'EXISTS'
-  | 'NO_MATCH'
-  | 'AMBIGUOUS'
-  | 'DENIED'
-  | 'TOO_LARGE'
-  | 'INVALID';
-
-export class WorkspaceError extends Error {
-  constructor(
-    readonly code: WorkspaceErrorCode,
-    message: string,
-  ) {
-    super(message);
-  }
-}
-
-export interface DirEntry {
-  name: string;
-  dir: boolean;
-  size?: number;
-  mtime?: string;
-}
-
-export interface FileSlice {
-  path: string;
-  totalLines: number;
-  offset: number;
-  lines: Array<{ n: number; text: string }>;
-}
-
-export interface ExecResult {
-  code: number;
-  output: string;
-  timedOut: boolean;
-  durationMs: number;
-}
 
 @Injectable()
 export class WorkspaceService implements OnModuleInit {
@@ -65,17 +28,6 @@ export class WorkspaceService implements OnModuleInit {
     return this.root;
   }
 
-  private parseFrontmatter(raw: string): { meta: Record<string, string>; body: string } {
-    const match = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(raw);
-    if (!match) return { meta: {}, body: raw };
-    const meta: Record<string, string> = {};
-    for (const line of match[1]!.split('\n')) {
-      const kv = /^([a-zA-Z_][a-zA-Z0-9_-]*):\s*(.*)$/.exec(line.trim());
-      if (kv) meta[kv[1]!] = kv[2]!.trim();
-    }
-    return { meta, body: match[2] ?? '' };
-  }
-
   async listSkills(): Promise<Array<{ slug: string; name: string; description: string }>> {
     const skillsDir = join(this.root, 'skills');
     let dirents;
@@ -89,7 +41,7 @@ export class WorkspaceService implements OnModuleInit {
       if (!dirent.isDirectory()) continue;
       try {
         const raw = await fs.readFile(join(skillsDir, dirent.name, 'SKILL.md'), 'utf8');
-        const { meta } = this.parseFrontmatter(raw);
+        const { meta } = parseFrontmatter(raw);
         skills.push({
           slug: dirent.name,
           name: meta.name ?? dirent.name,
@@ -111,7 +63,7 @@ export class WorkspaceService implements OnModuleInit {
     } catch {
       throw new WorkspaceError('NOT_FOUND', `skill "${slug}" does not exist`);
     }
-    const { meta, body } = this.parseFrontmatter(raw);
+    const { meta, body } = parseFrontmatter(raw);
     const defaults: Record<string, string> = {};
     for (const key of ['model', 'effort', 'maxSteps']) {
       if (meta[key]) defaults[key] = meta[key]!;
@@ -433,28 +385,5 @@ export class WorkspaceService implements OnModuleInit {
         resolve({ code: code ?? (timedOut ? 124 : 1), output: capOutput(kept, totalSeen), timedOut, durationMs: Date.now() - started });
       });
     });
-  }
-}
-
-function capOutput(output: string, totalSeen: number): string {
-  if (totalSeen <= EXEC_OUTPUT_CAP) return output;
-  const head = output.slice(0, EXEC_OUTPUT_CAP / 2);
-  const tail = output.slice(-(EXEC_OUTPUT_CAP / 2));
-  return `${head}\n… ${totalSeen - EXEC_OUTPUT_CAP} chars elided …\n${tail}`;
-}
-
-async function fileEndsWithoutNewline(target: string): Promise<boolean> {
-  let fh: Awaited<ReturnType<typeof fs.open>> | null = null;
-  try {
-    fh = await fs.open(target, 'r');
-    const stat = await fh.stat();
-    if (stat.size === 0) return false;
-    const buffer = Buffer.alloc(1);
-    await fh.read(buffer, 0, 1, stat.size - 1);
-    return buffer.toString('utf8') !== '\n';
-  } catch {
-    return false;
-  } finally {
-    await fh?.close();
   }
 }

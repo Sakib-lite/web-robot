@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { buildDebugReport, type TaskTrace } from './tasks.debug.report';
+import { buildDebugReport } from './tasks.debug.report';
+import type { TaskTrace } from './tasks.debug.report.types';
 import { Action } from './entities/action.entity';
 import { LlmCall } from './entities/llm-call.entity';
 import { Observation } from './entities/observation.entity';

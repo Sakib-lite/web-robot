@@ -7,7 +7,7 @@ import { getProduct } from '../llm/products';
 import { chromeArea } from '../storage/area';
 import { runClaimedTask } from './claim';
 import { runRemoteTask } from '../telemetry/client';
-import { getBackendUrl, isRemoteWorkerEnabled, saveRemoteWorkerEnabled } from '../telemetry/settings';
+import { getBackendUrl, isRemoteWorkerEnabled, saveRemoteWorkerEnabled } from '../telemetry/settings.helper';
 
 export interface RemoteDeps {
   source: string;

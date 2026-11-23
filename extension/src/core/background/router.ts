@@ -1,8 +1,8 @@
 import type { Action } from '../driver/types';
 import type { ContentRequest, ContentResponse, PanelRequest, PanelResponse } from '../messaging/protocol';
-import { cdpFor, type Cdp, type DebuggerApi } from '../driver/cdp';
-import { capture } from '../driver/capture';
-import { modifiersMask, resolveKey } from '../driver/keys';
+import { cdpFor, type Cdp, type DebuggerApi } from '../driver/cdp.helper';
+import { capture } from '../driver/capture.helper';
+import { modifiersMask, resolveKey } from '../driver/keys.helper';
 
 const CONTENT_SCRIPT_FILE = 'content-scripts/content.js';
 

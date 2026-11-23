@@ -4,7 +4,7 @@ import { Chevron, Collapse } from './common/ui';
 import { allProducts, catalogModels, type Effort, type ProductId } from '@/core/llm/products';
 import type { LlmProvider, ProductStore, StoredProductConfig } from '@/core/llm/providers';
 import { syncConfigToBackend } from '@/core/llm/providers';
-import { DEFAULT_BACKEND_URL, getBackendUrl, isRemoteWorkerEnabled, saveBackendUrl, saveRemoteWorkerEnabled } from '@/core/telemetry/settings';
+import { DEFAULT_BACKEND_URL, getBackendUrl, isRemoteWorkerEnabled, saveBackendUrl, saveRemoteWorkerEnabled } from '@/core/telemetry/settings.helper';
 
 interface CardState {
   apiKey: string;

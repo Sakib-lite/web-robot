@@ -1,5 +1,5 @@
 import type { StorageArea } from '../storage/area';
-import { ENV_SEED } from './seed';
+import { ENV_SEED } from './seed.helper';
 import type { Effort, ProductId } from './products';
 
 export interface LlmProvider {

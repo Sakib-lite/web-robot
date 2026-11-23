@@ -1,5 +1,5 @@
-import { runTask } from '../agent/loop';
-import { makeSubAgent } from '../agent/subagent';
+import { runTask } from '../agent/loop/loop';
+import { makeSubAgent } from '../agent/subagent/subagent';
 import { chatCompletion } from '../llm/chatClient';
 import type { ChatMessage, ToolDef } from '../llm/chatClient';
 
@@ -86,7 +86,7 @@ export async function runRemoteTask(
     makeDriver: () => import('../driver/types').Driver;
     signal?: AbortSignal;
     maxSteps?: number;
-    workspace?: { plane: import('../local/plane').LocalPlane; root: string };
+    workspace?: { plane: import('../local/plane.types').LocalPlane; root: string };
     preamble?: string;
     steps?: string[];
     history?: import('../llm/chatClient').ChatMessage[];

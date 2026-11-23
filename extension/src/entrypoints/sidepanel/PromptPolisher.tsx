@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { PolishedPrompt } from '@/core/agent/polish';
+import type { PolishedPrompt } from '@/core/agent/polish/polish';
 import { Chevron, Collapse } from './common/ui';
 
 export default function PromptPolisher({

@@ -1,4 +1,4 @@
-import { PlaneError, type ExecResult, type FileSlice, type LocalPlane, type WorkspaceInfo } from './plane';
+import { PlaneError, type ExecResult, type FileSlice, type LocalPlane, type WorkspaceInfo } from './plane.types';
 
 const FS_TIMEOUT_MS = 15_000;
 

@@ -1,5 +1,6 @@
 import { Body, Controller, ForbiddenException, Get, HttpException, HttpStatus, Injectable, Param, Post } from '@nestjs/common';
-import { WorkspaceError, WorkspaceService } from './workspace.service';
+import { WorkspaceError } from './workspace.types';
+import { WorkspaceService } from './workspace.service';
 import { FsAppendDto, FsEditDto, FsListDto, FsPathDto, FsReadDto, FsWriteDto } from './dto/fs.dto';
 import { ExecDto } from './dto/exec.dto';
 import { WorkspaceControlDto } from './dto/workspace-control.dto';

@@ -1,5 +1,6 @@
 import { Body, Controller, HttpException, HttpStatus, Injectable, Post } from '@nestjs/common';
-import { WebError, WebService } from './web.service';
+import { WebError } from './web.types';
+import { WebService } from './web.service';
 import { WebFetchDto, WebSearchDto } from './dto/web.dto';
 
 const STATUS_BY_CODE: Record<string, HttpStatus> = {

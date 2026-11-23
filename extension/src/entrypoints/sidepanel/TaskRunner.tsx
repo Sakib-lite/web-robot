@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { runTask, type StepRecord, type TaskResult } from '@/core/agent/loop';
-import { planTask } from '@/core/agent/planner';
-import { makeSubAgent } from '@/core/agent/subagent';
+import { runTask, type StepRecord, type TaskResult } from '@/core/agent/loop/loop';
+import { planTask } from '@/core/agent/planner/planner';
+import { makeSubAgent } from '@/core/agent/subagent/subagent';
 import { createExtensionDriver } from '@/core/driver/extensionDriver';
 import { createHttpPlane } from '@/core/local/httpPlane';
 import { chatCompletion, type ChatMessage, type ChatResponse, type ToolDef } from '@/core/llm/chatClient';
 import { resolveActiveProvider, type LlmProvider, type ProductStore, type StoredProductConfig } from '@/core/llm/providers';
 import { getProduct, catalogModels, type Effort, type ProductId } from '@/core/llm/products';
-import { getBackendUrl } from '@/core/telemetry/settings';
+import { getBackendUrl } from '@/core/telemetry/settings.helper';
 import { Chevron, Collapse } from './common/ui';
 import { StepsEditor } from './StepsEditor';
 import { Transcript, type ChatMessageRow, type RecentTask } from './ChatSection';
 import { startTelemetry } from '@/core/telemetry/client';
-import { polishPrompt } from '@/core/agent/polish';
+import { polishPrompt } from '@/core/agent/polish/polish';
 import PromptPolisher from './PromptPolisher';
 
 interface SkillOption {
